@@ -320,6 +320,7 @@ h3 {
     display: grid;
     grid-template-columns: 1.25fr 0.75fr;
     gap: 1rem;
+    isolation: isolate;
 }
 .sheet-header,
 .stats-panel,
@@ -360,6 +361,28 @@ h3 {
 .skills-panel,
 .items-panel {
     grid-column: 1 / -1;
+}
+.sheet-grid > .stats-panel,
+.sheet-grid > .vitals,
+.sheet-grid > .skills-panel,
+.sheet-grid > .items-panel,
+.sheet-grid > .tracks {
+    position: relative;
+}
+.sheet-grid > .stats-panel {
+    z-index: 30;
+}
+.sheet-grid > .vitals {
+    z-index: 25;
+}
+.sheet-grid > .tracks {
+    z-index: 20;
+}
+.sheet-grid > .skills-panel {
+    z-index: 10;
+}
+.sheet-grid > .items-panel {
+    z-index: 5;
 }
 .stat-groups {
     display: grid;
@@ -402,6 +425,97 @@ h3 {
     color: var(--muted);
     font-style: normal;
     font-size: 0.82rem;
+}
+.stat-row--breakdown,
+.vital-row--breakdown {
+    position: relative;
+    overflow: visible;
+    outline: none;
+}
+.stat-row--breakdown:hover,
+.stat-row--breakdown:focus-within,
+.stat-row--breakdown:focus,
+.vital-row--breakdown:hover,
+.vital-row--breakdown:focus-within,
+.vital-row--breakdown:focus {
+    z-index: 80;
+}
+.calculation-popover,
+.stat-breakdown-popover {
+    position: absolute;
+    padding: 0.8rem;
+    border: 1px solid rgba(139, 233, 253, 0.5);
+    border-radius: 0.85rem;
+    background: rgba(10, 12, 22, 0.97);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(2px);
+}
+.stat-breakdown-popover {
+    right: 0;
+    top: calc(100% + 0.35rem);
+    z-index: 90;
+    min-width: 30rem;
+    max-width: min(54rem, 92vw);
+    opacity: 0;
+    transform: translateY(-0.2rem);
+    pointer-events: none;
+    transition:
+        opacity 140ms ease,
+        transform 140ms ease;
+}
+.stat-row--breakdown:hover .stat-breakdown-popover,
+.stat-row--breakdown:focus-within .stat-breakdown-popover,
+.stat-row--breakdown:focus .stat-breakdown-popover,
+.vital-row--breakdown:hover .stat-breakdown-popover,
+.vital-row--breakdown:focus-within .stat-breakdown-popover,
+.vital-row--breakdown:focus .stat-breakdown-popover {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+}
+.stat-breakdown-popover-scroll {
+    overflow-x: auto;
+}
+.stat-breakdown-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 0.78rem;
+}
+.stat-breakdown-table caption {
+    margin-bottom: 0.45rem;
+    color: var(--accent);
+    font-weight: 800;
+    text-align: left;
+}
+.stat-breakdown-table th,
+.stat-breakdown-table td {
+    padding: 0.36rem 0.42rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    text-align: right;
+    white-space: nowrap;
+}
+.stat-breakdown-table th:first-child,
+.stat-breakdown-table td:first-child {
+    text-align: left;
+}
+.stat-breakdown-table thead th {
+    color: var(--muted);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+.stat-breakdown-table tfoot th,
+.stat-breakdown-table tfoot td {
+    color: var(--text);
+    font-weight: 800;
+}
+.vital-breakdown-popover {
+    min-width: 22rem;
+    max-width: min(28rem, 92vw);
+}
+.vital-breakdown-table {
+    table-layout: auto;
 }
 .vital-row {
     padding: 0.85rem 0;
@@ -782,16 +896,17 @@ h3 {
 .skill-scroll-container {
     max-height: 24rem;
     overflow-y: auto;
+    overflow-x: visible;
     display: grid;
     gap: 0.4rem;
     padding-right: 0.3rem;
 }
 .skill-chip-with-tooltip {
     position: relative;
-    z-index: 0;
+    z-index: 1;
     max-width: 100%;
     min-height: 4rem;
-    overflow: hidden;
+    overflow: visible;
 }
 .skill-chip-name {
     flex: 1;
@@ -800,27 +915,22 @@ h3 {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-.skill-chip-with-tooltip:hover {
-    z-index: 40;
+.skill-chip-with-tooltip:hover,
+.skill-chip-with-tooltip:focus,
+.skill-chip-with-tooltip:focus-visible {
+    z-index: 80;
 }
 .skill-tooltip {
-    position: absolute;
     left: 0;
     top: 100%;
-    z-index: 50;
+    z-index: 90;
     margin-top: 0.3rem;
-    background: rgba(10, 12, 22, 0.97);
-    border: 1px solid rgba(139, 233, 253, 0.5);
-    border-radius: 0.75rem;
-    padding: 0.7rem 0.85rem;
     display: flex;
     flex-direction: column;
     gap: 0.3rem;
     min-width: 18rem;
     max-width: 26rem;
-    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.85);
     pointer-events: none;
-    backdrop-filter: blur(2px);
 }
 .skill-tooltip.flip-up {
     top: auto;
@@ -829,8 +939,39 @@ h3 {
     margin-bottom: 0.3rem;
     box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.75);
 }
+.hover-card-portal {
+    position: fixed;
+    z-index: 2147483647;
+    margin: 0;
+}
+.hover-card-portal.flip-up {
+    bottom: auto;
+    margin: 0;
+}
 .skill-tooltip strong {
     font-size: 0.95rem;
+}
+.skill-tooltip-meta {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.35rem;
+}
+.skill-tooltip-meta > span {
+    display: flex;
+    flex-direction: column;
+    gap: 0.12rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0.55rem;
+    padding: 0.35rem 0.45rem;
+    background: rgba(255, 255, 255, 0.045);
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 0.74rem;
+}
+.skill-tooltip-meta strong {
+    color: var(--accent);
+    font-size: 0.64rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
 }
 .skill-tooltip-affinities {
     display: flex;
@@ -843,29 +984,29 @@ h3 {
     line-height: 1.35;
 }
 .definition-tooltip {
-    position: absolute;
     left: 0;
     top: 100%;
-    z-index: 50;
+    z-index: 90;
     margin-top: 0.3rem;
-    background: rgba(10, 12, 22, 0.97);
-    border: 1px solid rgba(139, 233, 253, 0.5);
-    border-radius: 0.75rem;
-    padding: 0.7rem 0.85rem;
     display: flex;
     flex-direction: column;
     gap: 0.3rem;
     min-width: 16rem;
     max-width: 24rem;
-    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.85);
     pointer-events: none;
-    backdrop-filter: blur(2px);
 }
 .definition-tooltip strong {
     font-size: 0.95rem;
 }
-.definition-chip-with-tooltip:hover {
-    z-index: 40;
+.definition-chip-with-tooltip {
+    position: relative;
+    z-index: 1;
+    overflow: visible;
+}
+.definition-chip-with-tooltip:hover,
+.definition-chip-with-tooltip:focus,
+.definition-chip-with-tooltip:focus-visible {
+    z-index: 80;
 }
 .drop-zone {
     border: 1px dashed rgba(139, 233, 253, 0.45);
@@ -909,12 +1050,27 @@ h3 {
 }
 .skill-source-list {
     max-height: 22rem;
-    overflow: auto;
+    overflow-y: auto;
+    overflow-x: visible;
 }
 .item-skill-list {
     display: grid;
     gap: 0.35rem;
     margin-top: 0.5rem;
+}
+.quick-add-row {
+    display: grid;
+    gap: 0.55rem;
+    margin-bottom: 0.85rem;
+    padding: 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: 0.9rem;
+    background: rgba(255, 255, 255, 0.035);
+}
+.quick-add-results {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
 }
 .item-grid {
     display: grid;

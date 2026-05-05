@@ -4,7 +4,7 @@ All creatures, monstrous or humanoid have a race. This is hugely important for m
 # Race Statistics
 Races receive stat increases each time their race levels up. The point pool is based on character type, the actual tier record the race is assigned to, and rarity, then distributed by the race's stat-growth ratio. The tier used here is not the race template's minimum available tier.
 
-Race level-up points: `Character Type Multiplier * (Tier * 2) * 10 * Rarity Multiplier`.
+Race level-up points: `Character Type Multiplier * Tier Race Multiplier * Rarity Multiplier`.
 
 Character Type multiplier:
 * Humanoid: 1

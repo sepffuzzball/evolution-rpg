@@ -39,3 +39,11 @@
 - Alternatives considered: Keep the hard-coded switch; create fully user-defined character kinds.
 - Consequences: Tables can rebalance character type growth from the Compendium while preserving the fixed character-kind behavior used by progression rules.
 - Related files/tasks: `src/types.ts`, `src/data.ts`, `src/storage.ts`, `src/App.tsx`, TASK-004.
+
+## 2026-05-05: Store tier definitions and tier bonuses in the shared ledger
+
+- Context: Tier rules, max levels, and tier-derived formula multipliers were hard-coded, blocking custom tier counts and balancing.
+- Decision: Add `tierDefinitions` to `AppState` with tier number, title, details, max level, race/class/job/item multipliers, and static tier bonus. Seed defaults from existing tiers and use the definitions for formulas, UI bounds, timelines, and totals.
+- Alternatives considered: Keep hard-coded `TIER_RULES` and only add a separate multiplier table; make tier bonuses item-like bonuses instead of tier metadata.
+- Consequences: Tables can add or rebalance tiers from the Compendium. Existing ledgers receive default tier definitions during sanitization. Static tier bonuses now contribute to every stat for each reached tier.
+- Related files/tasks: `src/types.ts`, `src/data.ts`, `src/storage.ts`, `src/App.tsx`, TASK-006.

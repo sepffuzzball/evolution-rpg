@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
     clampPercent,
     createCharacter,
@@ -59,6 +60,7 @@ const characterKinds: CharacterKind[] = ["humanoid", "monster", "half-monster"];
 const skillKinds: SkillKind[] = ["Active", "Passive"];
 const skillSources: SkillSource[] = ["Race", "Class", "Job", "Item", "Other"];
 const EXP_STAGE_SIZE = 10;
+const HOVER_CARD_DELAY_MS = 450;
 
 function tierDefinition(
     tierDefinitions: TierDefinition[] | undefined,
@@ -564,6 +566,57 @@ function itemFromDefinition(
     };
 }
 
+function itemSetSkills(
+    character: Character,
+    skillDefinitions: SkillDefinition[],
+): Skill[] {
+    return character.items.flatMap((item) => {
+        const setNames = item.setSkillNames?.length
+            ? item.setSkillNames
+            : item.skillSet && item.skillName
+              ? [item.skillName]
+              : [];
+
+        return setNames.map((skillName) => {
+            const definition = skillDefinitions.find(
+                (skill) => skill.name === skillName,
+            );
+            return {
+                id: `item-skill-${item.id}-${skillName}`,
+                definitionId: definition?.id,
+                name: skillName,
+                kind: definition?.kind ?? "Active",
+                source: "Item",
+                rarity: definition?.rarity ?? item.rarity,
+                level: definition?.levelled === false ? null : 1,
+                exp: 0,
+                mpCost:
+                    definition?.mpCost ??
+                    (definition?.kind === "Passive" ? "N/A" : "Average"),
+                castingTime:
+                    definition?.castingTime ??
+                    (definition?.kind === "Passive" ? "N/A" : "Instant"),
+                cooldown:
+                    definition?.cooldown ??
+                    (definition?.kind === "Passive" ? "N/A" : "Instant"),
+                description:
+                    definition?.description ??
+                    `Set skill provided by ${item.name}.`,
+            } satisfies Skill;
+        });
+    });
+}
+
+function itemSetSkillCount(items: Item[]): number {
+    return items.reduce(
+        (count, item) =>
+            count +
+            (item.setSkillNames?.length ??
+                (item.skillSet && item.skillName ? 1 : 0)),
+        0,
+    );
+}
+
 function findDefinitionByTrack(
     definitions: AdvancementDefinition[],
     kind: DefinitionKind,
@@ -687,6 +740,128 @@ function calculatedProgressionBonuses(
     return addStats(...gains);
 }
 
+interface StatBreakdownRow {
+    tier: number;
+    title: string;
+    tierBonus: number;
+    race: number;
+    classBonus: number;
+    job: number;
+    items: number;
+    total: number;
+}
+
+function trackStatContribution(
+    character: Character,
+    definitions: AdvancementDefinition[],
+    tierDefinitions: TierDefinition[],
+    characterTypeDefinitions: CharacterTypeDefinition[],
+    rarityDefinitions: RarityDefinition[],
+    tierData: TierProgression,
+    kind: DefinitionKind,
+    track: TierTrackSelection | undefined,
+    level: number,
+    statKey: StatKey,
+): number {
+    if (!track || level <= 0) return 0;
+    const definition = findDefinitionByTrack(
+        definitions,
+        kind,
+        track.name,
+        track.definitionId,
+    );
+    if (!definition) return 0;
+    const singleLevelGain = distributedStatGain(
+        character,
+        definition,
+        tierData.tier,
+        tierDefinitions,
+        characterTypeDefinitions,
+        rarityDefinitions,
+    );
+    return partialStatTotal(scaledStatGain(singleLevelGain, level), statKey);
+}
+
+function statBreakdownRows(
+    character: Character,
+    definitions: AdvancementDefinition[],
+    tierDefinitions: TierDefinition[],
+    characterTypeDefinitions: CharacterTypeDefinition[],
+    rarityDefinitions: RarityDefinition[],
+    statKey: StatKey,
+): StatBreakdownRow[] {
+    return [...character.tiers]
+        .sort((a, b) => a.tier - b.tier)
+        .map((tierData) => {
+            const tierDef = tierDefinition(tierDefinitions, tierData.tier);
+            const raceLevel =
+                character.kind === "humanoid" &&
+                tierData.classTrack &&
+                tierData.jobTrack
+                    ? Math.floor(
+                          (((tierData.classTrack as any).level ?? 1) +
+                              ((tierData.jobTrack as any).level ?? 1)) /
+                              2,
+                      )
+                    : (tierData.race.level ?? 1);
+            const race = trackStatContribution(
+                character,
+                definitions,
+                tierDefinitions,
+                characterTypeDefinitions,
+                rarityDefinitions,
+                tierData,
+                "race",
+                tierData.race,
+                raceLevel,
+                statKey,
+            );
+            const classBonus = trackStatContribution(
+                character,
+                definitions,
+                tierDefinitions,
+                characterTypeDefinitions,
+                rarityDefinitions,
+                tierData,
+                "class",
+                tierData.classTrack,
+                (tierData.classTrack as any)?.level ?? 0,
+                statKey,
+            );
+            const job = trackStatContribution(
+                character,
+                definitions,
+                tierDefinitions,
+                characterTypeDefinitions,
+                rarityDefinitions,
+                tierData,
+                "job",
+                tierData.jobTrack,
+                (tierData.jobTrack as any)?.level ?? 0,
+                statKey,
+            );
+            const items = character.items.reduce(
+                (sum, item) =>
+                    itemBonusApplies(character.items, item.id) &&
+                    (item.tier ?? character.currentTier) === tierData.tier
+                        ? sum + partialStatTotal(item.statBonuses, statKey)
+                        : sum,
+                0,
+            );
+            const tierBonus = tierDef.staticBonus;
+            return {
+                tier: tierData.tier,
+                title: tierDef.title,
+                tierBonus,
+                race,
+                classBonus,
+                job,
+                items,
+                total: tierBonus + race + classBonus + job + items,
+            };
+        });
+}
+
 function formatStatGain(gained: Partial<StatBlock>): string[] {
     return statKeys
         .filter((key) => gained[key])
@@ -745,10 +920,21 @@ function stepSkillExperience(skill: Skill, direction: 1 | -1): Skill {
 function enforceItemSkillLimit(items: Item[], tier: number): Item[] {
     let setCount = 0;
     return items.map((item) => {
-        if (!item.skillName || !item.skillSet) return item;
-        if (setCount >= tier) return { ...item, skillSet: false };
-        setCount += 1;
-        return item;
+        const currentSet = item.setSkillNames?.length
+            ? item.setSkillNames
+            : item.skillSet && item.skillName
+              ? [item.skillName]
+              : [];
+        if (!currentSet.length) return item;
+
+        const allowed = currentSet.slice(0, Math.max(0, tier - setCount));
+        setCount += allowed.length;
+        return {
+            ...item,
+            setSkillNames: allowed,
+            skillSet: allowed.length > 0,
+            skillName: item.skillName || allowed[0] || "",
+        };
     });
 }
 
@@ -940,9 +1126,7 @@ function calculateTotals(
     rarityDefinitions: RarityDefinition[],
 ): StatBlock {
     return addStats(
-        character.baseStats,
         tierBonusStats(tierDefinitions, character.currentTier),
-        character.raceBonuses,
         calculatedProgressionBonuses(character, definitions, tierDefinitions, characterTypeDefinitions, rarityDefinitions),
         character.passiveBonuses,
         equipmentBonuses(character.items),
@@ -970,7 +1154,10 @@ function trackLabel(character: Character): string {
     return `Class + Job Levels (T${character.currentTier})`;
 }
 
-function currentTrackMilestones(character: Character): PathMilestone[] {
+function currentTrackMilestones(
+    character: Character,
+    tierDefinitions: TierDefinition[],
+): PathMilestone[] {
     const currentTierData = character.tiers.find((t) => t.status === "current");
     if (!currentTierData) return [];
 
@@ -981,7 +1168,7 @@ function currentTrackMilestones(character: Character): PathMilestone[] {
             label: currentTierData.race.name || "Unassigned Race",
             rarity: currentTierData.race.rarity,
             source: "Race",
-            notes: `Current race track · level ${currentTierData.race.level}/${maxLevelForTier(character.currentTier)}`,
+            notes: `Current race track · level ${currentTierData.race.level}/${maxLevelForTier(tierDefinitions, character.currentTier)}`,
         },
     ];
 
@@ -1010,7 +1197,10 @@ function currentTrackMilestones(character: Character): PathMilestone[] {
     return milestones;
 }
 
-function sortedPath(character: Character): PathMilestone[] {
+function sortedPath(
+    character: Character,
+    tierDefinitions: TierDefinition[],
+): PathMilestone[] {
     const manualPath = character.path.filter(
         (milestone) =>
             !(
@@ -1018,7 +1208,7 @@ function sortedPath(character: Character): PathMilestone[] {
                 milestone.notes === "Starting race granted by The System."
             ),
     );
-    return [...currentTrackMilestones(character), ...manualPath].sort(
+    return [...currentTrackMilestones(character, tierDefinitions), ...manualPath].sort(
         (a, b) => a.tier - b.tier || a.label.localeCompare(b.label),
     );
 }
@@ -1111,9 +1301,7 @@ function App() {
     const [draft, setDraft] = useState<Character | null>(null);
     const [wizardStep, setWizardStep] = useState<WizardStep>(0);
     const [importError, setImportError] = useState("");
-    const [levelUpNotice, setLevelUpNotice] = useState<LevelUpNotice | null>(
-        null,
-    );
+    const [levelUpNotices, setLevelUpNotices] = useState<LevelUpNotice[]>([]);
 
     useEffect(() => {
         let cancelled = false;
@@ -1484,12 +1672,19 @@ function App() {
                             tierDefinitions={state.tierDefinitions}
                             characterTypeDefinitions={state.characterTypeDefinitions}
                             rarityDefinitions={state.rarityDefinitions}
+                            skillDefinitions={state.skillDefinitions}
+                            itemDefinitions={state.itemDefinitions}
                             affinityDefinitions={state.affinityDefinitions}
                             currencyDefinitions={state.currencyDefinitions}
                             onEdit={editSelected}
                             onDelete={deleteSelected}
                             onUpdate={updateSelected}
-                            onLevelUp={setLevelUpNotice}
+                            onLevelUp={(notice) =>
+                                setLevelUpNotices((current) => [
+                                    ...current,
+                                    notice,
+                                ])
+                            }
                         />
                     ) : (
                         <EmptyState onCreate={() => startCreate("humanoid")} />
@@ -1547,10 +1742,12 @@ function App() {
                 ) : null}
             </section>
 
-            {levelUpNotice ? (
+            {levelUpNotices[0] ? (
                 <LevelUpModal
-                    notice={levelUpNotice}
-                    onClose={() => setLevelUpNotice(null)}
+                    notice={levelUpNotices[0]}
+                    onClose={() =>
+                        setLevelUpNotices((current) => current.slice(1))
+                    }
                 />
             ) : null}
         </main>
@@ -1583,6 +1780,8 @@ interface CharacterSheetProps {
     tierDefinitions: TierDefinition[];
     characterTypeDefinitions: CharacterTypeDefinition[];
     rarityDefinitions: RarityDefinition[];
+    skillDefinitions: SkillDefinition[];
+    itemDefinitions: ItemDefinition[];
     affinityDefinitions: AffinityDefinition[];
     currencyDefinitions: CurrencyDefinition[];
     onEdit: () => void;
@@ -1598,6 +1797,8 @@ function CharacterSheet({
     tierDefinitions,
     characterTypeDefinitions,
     rarityDefinitions,
+    skillDefinitions,
+    itemDefinitions,
     affinityDefinitions,
     currencyDefinitions,
     onEdit,
@@ -1605,28 +1806,129 @@ function CharacterSheet({
     onUpdate,
     onLevelUp,
 }: CharacterSheetProps) {
-    const progressionGrowth = calculatedProgressionBonuses(
-        character,
-        definitions,
-        tierDefinitions,
-        characterTypeDefinitions,
-        rarityDefinitions,
-    );
     const totals = calculateTotals(character, definitions, tierDefinitions, characterTypeDefinitions, rarityDefinitions);
+    const equippedBonuses = equipmentBonuses(character.items);
+    const [itemSearch, setItemSearch] = useState("");
     const itemSkillLimit = character.currentTier;
-    const itemSkillsSet = character.items.reduce(
-        (count, item) =>
-            count +
-            (item.setSkillNames?.length ??
-                (item.skillSet && item.skillName ? 1 : 0)),
-        0,
-    );
-    const activeSkills = character.skills.filter(
+    const itemSkillsSet = itemSetSkillCount(character.items);
+    const itemProvidedSkills = itemSetSkills(character, skillDefinitions);
+    const activeSkills = [...character.skills, ...itemProvidedSkills].filter(
         (skill) => skill.kind === "Active",
     );
-    const passiveSkills = character.skills.filter(
+    const passiveSkills = [...character.skills, ...itemProvidedSkills].filter(
         (skill) => skill.kind === "Passive",
     );
+    const filteredQuickItems = itemDefinitions
+        .filter((item) =>
+            item.name.toLowerCase().includes(itemSearch.trim().toLowerCase()),
+        )
+        .slice(0, 6);
+
+    function renderStatBreakdown(statKey: StatKey): JSX.Element {
+        const rows = statBreakdownRows(
+            character,
+            definitions,
+            tierDefinitions,
+            characterTypeDefinitions,
+            rarityDefinitions,
+            statKey,
+        );
+        const passive = partialStatTotal(character.passiveBonuses, statKey);
+        const tierRowsTotal = rows.reduce((sum, row) => sum + row.total, 0);
+        const total = passive + tierRowsTotal;
+
+        return (
+            <div className="stat-breakdown-popover calculation-popover" role="tooltip">
+                <div className="stat-breakdown-popover-scroll">
+                    <table className="stat-breakdown-table">
+                        <caption>{STAT_LABELS[statKey]} calculation</caption>
+                        <thead>
+                            <tr>
+                                <th>Tier</th>
+                                <th>Tier Bonus</th>
+                                <th>Race</th>
+                                <th>Class</th>
+                                <th>Job</th>
+                                <th>Items</th>
+                                <th>Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {rows.map((row) => (
+                                <tr key={row.tier}>
+                                    <th scope="row">
+                                        T{row.tier} · {row.title}
+                                    </th>
+                                    <td>{displayNumber(row.tierBonus)}</td>
+                                    <td>{displayNumber(row.race)}</td>
+                                    <td>{displayNumber(row.classBonus)}</td>
+                                    <td>{displayNumber(row.job)}</td>
+                                    <td>{displayNumber(row.items)}</td>
+                                    <td>{displayNumber(row.total)}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <th scope="row">Passive bonuses</th>
+                                <td colSpan={5} />
+                                <td>{displayNumber(passive)}</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Calculated total</th>
+                                <td colSpan={5}>{displayNumber(tierRowsTotal)} tier-derived</td>
+                                <td>{displayNumber(total)}</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+        );
+    }
+
+    function renderVitalBreakdown(kind: "hp" | "mp"): JSX.Element {
+        const isHp = kind === "hp";
+        const primaryKey: StatKey = isHp ? "fortitude" : "mana";
+        const secondaryKey: StatKey = isHp ? "strength" : "intelligence";
+        const primary = totals[primaryKey];
+        const secondary = totals[secondaryKey];
+        const scaled = primary * character.currentTier;
+        const total = scaled + secondary;
+
+        return (
+            <div className="stat-breakdown-popover vital-breakdown-popover calculation-popover" role="tooltip">
+                <div className="stat-breakdown-popover-scroll">
+                    <table className="stat-breakdown-table vital-breakdown-table">
+                        <caption>{isHp ? "HP" : "MP"} calculation</caption>
+                        <tbody>
+                            <tr>
+                                <th scope="row">{STAT_LABELS[primaryKey]}</th>
+                                <td>{displayNumber(primary)}</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Current tier multiplier</th>
+                                <td>× {displayNumber(character.currentTier)}</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Tier-scaled subtotal</th>
+                                <td>{displayNumber(scaled)}</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">+ {STAT_LABELS[secondaryKey]}</th>
+                                <td>{displayNumber(secondary)}</td>
+                            </tr>
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <th scope="row">Total {isHp ? "HP" : "MP"}</th>
+                                <td>{displayNumber(total)}</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+        );
+    }
 
     function getCurrentTierData(): TierProgression | undefined {
         return character.tiers.find((t) => t.status === "current");
@@ -1661,21 +1963,28 @@ function CharacterSheet({
             const nextTrack = stepTrackExperience(trackData, direction);
             const leveledUp = nextTrack.level > trackData.level;
 
+            const previousRaceLevel = currentTierData.race.level ?? 1;
+
             // For humanoids, advancing Class or Job also updates stored race level.
             let finalTiers = current.tiers.map((t) => {
                 if (t.status !== "current") return t;
                 return { ...t, [track]: nextTrack };
             });
 
+            let humanoidRaceLeveledUp = false;
+            let derivedRaceLevel = previousRaceLevel;
+
             if (
                 current.kind === "humanoid" &&
                 track !== "race" &&
-                finalTiers[0]?.classTrack &&
-                finalTiers[0]?.jobTrack
+                currentTierData.classTrack &&
+                currentTierData.jobTrack
             ) {
-                const classL = (finalTiers[0].classTrack as any).level ?? 1;
-                const jobL = (finalTiers[0].jobTrack as any).level ?? 1;
-                const derivedRaceLevel = Math.floor((classL + jobL) / 2);
+                const updatedTier = finalTiers.find((t) => t.status === "current")!;
+                const classL = (updatedTier.classTrack as any)?.level ?? 1;
+                const jobL = (updatedTier.jobTrack as any)?.level ?? 1;
+                derivedRaceLevel = Math.floor((classL + jobL) / 2);
+                humanoidRaceLeveledUp = derivedRaceLevel > previousRaceLevel;
                 finalTiers = finalTiers.map((t) => {
                     if (t.status !== "current") return t;
                     return {
@@ -1716,6 +2025,27 @@ function CharacterSheet({
                 level: nextTrack.level,
                 gained,
             });
+
+            if (humanoidRaceLeveledUp) {
+                const raceDefinition = definitionForTrack(
+                    definitions,
+                    currentTierDataAfter.race as LevelTrack,
+                    "race",
+                );
+                onLevelUp({
+                    characterName: current.name,
+                    trackName: currentTierDataAfter.race.name || "Race",
+                    level: derivedRaceLevel,
+                    gained: distributedStatGain(
+                        current,
+                        raceDefinition,
+                        currentTierDataAfter.tier,
+                        tierDefinitions,
+                        characterTypeDefinitions,
+                        rarityDefinitions,
+                    ),
+                });
+            }
 
             return { ...current, tiers: finalTiers };
         });
@@ -1766,6 +2096,22 @@ function CharacterSheet({
         });
     }
 
+    function addItemFromDefinitionToSheet(definition: ItemDefinition): void {
+        onUpdate((current) => ({
+            ...current,
+            items: [
+                ...current.items,
+                itemFromDefinition(
+                    definition,
+                    skillDefinitions,
+                    tierDefinitions,
+                    rarityDefinitions,
+                ),
+            ],
+        }));
+        setItemSearch("");
+    }
+
     const currentTierData = getCurrentTierData();
 
     return (
@@ -1799,13 +2145,15 @@ function CharacterSheet({
 
             <section className="vitals glass-panel">
                 <h3>Secondary Stats</h3>
-                <div className="vital-row">
+                <div className="vital-row vital-row--breakdown" tabIndex={0}>
                     <span>HP</span>
                     <strong>{displayNumber(hp(character, totals))}</strong>
+                    {renderVitalBreakdown("hp")}
                 </div>
-                <div className="vital-row">
+                <div className="vital-row vital-row--breakdown" tabIndex={0}>
                     <span>MP</span>
                     <strong>{displayNumber(mp(character, totals))}</strong>
+                    {renderVitalBreakdown("mp")}
                 </div>
                 <div className="vital-row">
                     <span>Item Skills Set</span>
@@ -1928,23 +2276,19 @@ function CharacterSheet({
                         <div key={group.label} className="stat-group">
                             <h4>{group.label}</h4>
                             {group.keys.map((key) => (
-                                <div key={key} className="stat-row">
+                                <div
+                                    key={key}
+                                    className="stat-row stat-row--breakdown"
+                                    tabIndex={0}
+                                >
                                     <span>{STAT_LABELS[key]}</span>
                                     <strong>
                                         {displayNumber(totals[key])}{" "}
                                         <em>
-                                            (+
-                                            {displayNumber(
-                                                partialStatTotal(
-                                                    equipmentBonuses(
-                                                        character.items,
-                                                    ),
-                                                    key,
-                                                ),
-                                            )}
-                                            )
+                                            (+eq {displayNumber(partialStatTotal(equippedBonuses, key))})
                                         </em>
                                     </strong>
+                                    {renderStatBreakdown(key)}
                                 </div>
                             ))}
                         </div>
@@ -1982,6 +2326,35 @@ function CharacterSheet({
 
             <section className="items-panel glass-panel">
                 <h3>Items</h3>
+                <div className="quick-add-row">
+                    <label>
+                        Quick add item
+                        <input
+                            type="search"
+                            value={itemSearch}
+                            placeholder="Search item compendium..."
+                            onChange={(event) => setItemSearch(event.target.value)}
+                        />
+                    </label>
+                    {itemSearch.trim() ? (
+                        <div className="quick-add-results">
+                            {filteredQuickItems.length ? (
+                                filteredQuickItems.map((item) => (
+                                    <button
+                                        key={item.id}
+                                        type="button"
+                                        className="secondary"
+                                        onClick={() => addItemFromDefinitionToSheet(item)}
+                                    >
+                                        + {item.name} · T{item.tier} · {item.rarity}
+                                    </button>
+                                ))
+                            ) : (
+                                <span className="muted small">No matching items.</span>
+                            )}
+                        </div>
+                    ) : null}
+                </div>
                 <p className="muted small">
                     Stat bonus limits: 3 armor, 3 accessories, 2 weapons. Item
                     skill slots equal current tier.
@@ -2264,7 +2637,10 @@ function SkillList({
         <div className="skill-list">
             <h4>{title}</h4>
             {skills.length ? (
-                skills.map((skill) => (
+                skills.map((skill) => {
+                    const isItemProvided = skill.id.startsWith("item-skill-");
+
+                    return (
                     <article key={skill.id} className="skill-card">
                         <div className="skill-card-header">
                             <strong>{skill.name}</strong>
@@ -2277,25 +2653,30 @@ function SkillList({
                             {skill.source} · MP {skill.mpCost || "N/A"} ·
                             Cooldown {skill.cooldown || "N/A"}
                         </p>
-                        <ProgressionControls
-                            levelLabel={`Level ${skill.level ?? 1}`}
-                            exp={skill.exp}
-                            onDecrease={() =>
-                                onChange(skill.id, (current) =>
-                                    stepSkillExperience(current, -1),
-                                )
-                            }
-                            onIncrease={() =>
-                                onChange(skill.id, (current) =>
-                                    stepSkillExperience(current, 1),
-                                )
-                            }
-                            decreaseDisabled={
-                                (skill.level ?? 1) <= 1 && skill.exp <= 0
-                            }
-                        />
+                        {isItemProvided ? (
+                            <p className="small muted">Provided by a set item skill.</p>
+                        ) : (
+                            <ProgressionControls
+                                levelLabel={`Level ${skill.level ?? 1}`}
+                                exp={skill.exp}
+                                onDecrease={() =>
+                                    onChange(skill.id, (current) =>
+                                        stepSkillExperience(current, -1),
+                                    )
+                                }
+                                onIncrease={() =>
+                                    onChange(skill.id, (current) =>
+                                        stepSkillExperience(current, 1),
+                                    )
+                                }
+                                decreaseDisabled={
+                                    (skill.level ?? 1) <= 1 && skill.exp <= 0
+                                }
+                            />
+                        )}
                     </article>
-                ))
+                );
+                })
             ) : (
                 <p className="muted small">
                     No {title.toLowerCase()} skills recorded.
@@ -3105,6 +3486,9 @@ function CreatorWizard({
                                         ? "(Current)"
                                         : "(Maxed)"}
                                 </legend>
+                                <p className="muted small">
+                                    Static tier bonus: +{displayNumber(tierDefinition(tierDefinitions, tierData.tier).staticBonus)} to all stats
+                                </p>
 
                                 {/* Race slot */}
                                 <div
@@ -3667,6 +4051,8 @@ function CreatorWizard({
                                 key={item.id}
                                 item={item}
                                 tier={draft.currentTier}
+                                itemSkillSetCount={itemSetSkillCount(draft.items)}
+                                itemSkillLimit={draft.currentTier}
                                 onChange={(updater) =>
                                     updateItem(item.id, updater)
                                 }
@@ -3890,15 +4276,20 @@ function SkillEditor({
 function ItemEditor({
     item,
     tier,
+    itemSkillSetCount,
+    itemSkillLimit,
     onChange,
     onRemove,
 }: {
     item: Item;
     tier: number;
+    itemSkillSetCount: number;
+    itemSkillLimit: number;
     onChange: (updater: (item: Item) => Item) => void;
     onRemove: () => void;
 }) {
     const hasSkills = (item.skillNames?.length ?? (item.skillName ? 1 : 0)) > 0;
+    const itemSkillSlotsFull = itemSkillSetCount >= itemSkillLimit;
 
     // Count equipped items by slot
     const equippedBySlot = {} as Record<ItemSlot, number>;
@@ -3941,7 +4332,7 @@ function ItemEditor({
                             className="eyebrow"
                             style={{ marginBottom: "0.4rem" }}
                         >
-                            Available Skills
+                            Available Skills ({itemSkillSetCount}/{itemSkillLimit} set)
                         </p>
                         {(item.skillNames?.length ?? 0) > 0 ? (
                             <div className="skill-toggle-list">
@@ -3974,6 +4365,9 @@ function ItemEditor({
                                                         currentSet.includes(
                                                             skillName,
                                                         );
+                                                    if (!isSet && itemSkillSlotsFull) {
+                                                        return current;
+                                                    }
                                                     return {
                                                         ...current,
                                                         setSkillNames: isSet
@@ -3990,6 +4384,16 @@ function ItemEditor({
                                                     };
                                                 })
                                             }
+                                            disabled={
+                                                !(
+                                                    item.setSkillNames?.includes(
+                                                        skillName,
+                                                    ) ||
+                                                    (item.skillSet &&
+                                                        item.skillName ===
+                                                            skillName)
+                                                ) && itemSkillSlotsFull
+                                            }
                                         />
                                         Set: {skillName}
                                     </label>
@@ -4000,6 +4404,11 @@ function ItemEditor({
                                 No skills defined for this item.
                             </p>
                         )}
+                        {itemSkillSlotsFull ? (
+                            <p className="muted small">
+                                Item skill slots are full for this tier.
+                            </p>
+                        ) : null}
                     </div>
                 ) : null}
             </div>
@@ -4190,6 +4599,7 @@ function CatalogManager({
             {activeTab === "skill" ? (
                 <SkillCompendium
                     skills={state.skillDefinitions}
+                    tierDefinitions={state.tierDefinitions}
                     rarityDefinitions={state.rarityDefinitions}
                     affinityDefinitions={state.affinityDefinitions}
                     selectedId={selectedId}
@@ -4202,6 +4612,7 @@ function CatalogManager({
             {activeTab === "item" ? (
                 <ItemCompendium
                     items={state.itemDefinitions}
+                    tierDefinitions={state.tierDefinitions}
                     rarityDefinitions={state.rarityDefinitions}
                     skills={state.skillDefinitions}
                     affinityDefinitions={state.affinityDefinitions}
@@ -4218,6 +4629,7 @@ function CatalogManager({
                 <AdvancementCompendium
                     kind={activeTab}
                     definitions={state.definitions}
+                    tierDefinitions={state.tierDefinitions}
                     rarityDefinitions={state.rarityDefinitions}
                     affinityDefinitions={state.affinityDefinitions}
                     selectedId={selectedId}
@@ -4652,6 +5064,7 @@ function EditorBadges({ children }: { children: React.ReactNode }) {
 function AdvancementCompendium({
     kind,
     definitions,
+    tierDefinitions,
     rarityDefinitions,
     affinityDefinitions,
     selectedId,
@@ -4660,6 +5073,7 @@ function AdvancementCompendium({
 }: {
     kind: DefinitionKind;
     definitions: AdvancementDefinition[];
+    tierDefinitions: TierDefinition[];
     rarityDefinitions: RarityDefinition[];
     affinityDefinitions: AffinityDefinition[];
     selectedId: string | null;
@@ -4677,6 +5091,7 @@ function AdvancementCompendium({
         activeDefinitions[0] ??
         null;
     const rarityOptions = rarityNames(rarityDefinitions);
+    const maxTier = maxConfiguredTier(tierDefinitions);
     const update = (
         id: string,
         updater: (definition: AdvancementDefinition) => AdvancementDefinition,
@@ -4865,7 +5280,7 @@ function AdvancementCompendium({
                                 <button
                                     type="button"
                                     className="stepper-btn"
-                                    disabled={selectedDefinition.minTier >= 10}
+                                    disabled={selectedDefinition.minTier >= maxTier}
                                     onClick={() =>
                                         update(
                                             selectedDefinition.id,
@@ -5247,6 +5662,7 @@ function CurrencyCompendium({
 
 function SkillCompendium({
     skills,
+    tierDefinitions,
     rarityDefinitions,
     affinityDefinitions,
     selectedId,
@@ -5254,6 +5670,7 @@ function SkillCompendium({
     onChange,
 }: {
     skills: SkillDefinition[];
+    tierDefinitions: TierDefinition[];
     rarityDefinitions: RarityDefinition[];
     affinityDefinitions: AffinityDefinition[];
     selectedId: string | null;
@@ -5297,6 +5714,7 @@ function SkillCompendium({
     const getAffinityTag = (affinity: AffinityDefinition) =>
         affinity.emoji ?? affinity.name.charAt(0);
     const rarityOptions = rarityNames(rarityDefinitions);
+    const maxTier = maxConfiguredTier(tierDefinitions);
 
     return (
         <div className="catalog-grid">
@@ -5391,7 +5809,7 @@ function SkillCompendium({
                                 <button
                                     type="button"
                                     className="stepper-btn"
-                                    disabled={selected.minTier >= 10}
+                                    disabled={selected.minTier >= maxTier}
                                     onClick={() =>
                                         update(selected.id, (skill) => ({
                                             ...skill,
@@ -5606,12 +6024,13 @@ function SkillChipWithTooltip({
     const [hovered, setHovered] = useState(false);
     const [showTooltip, setShowTooltip] = useState(false);
     const [flipUp, setFlipUp] = useState(false);
+    const [tooltipPosition, setTooltipPosition] = useState({ left: 0, top: 0 });
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const buttonRef = useRef<HTMLButtonElement | null>(null);
 
     useEffect(() => {
         if (hovered) {
-            timerRef.current = setTimeout(() => setShowTooltip(true), 2000);
+            timerRef.current = setTimeout(() => setShowTooltip(true), HOVER_CARD_DELAY_MS);
         } else {
             if (timerRef.current) clearTimeout(timerRef.current);
             setShowTooltip(false);
@@ -5623,17 +6042,45 @@ function SkillChipWithTooltip({
 
     useEffect(() => {
         if (!showTooltip || !buttonRef.current) return;
-        const btn = buttonRef.current;
-        const scroller = btn.closest(".skill-source-list");
-        if (!scroller) {
-            setFlipUp(false);
-            return;
-        }
-        const scrollerRect = scroller.getBoundingClientRect();
-        const btnRect = btn.getBoundingClientRect();
-        const spaceBelow = scrollerRect.bottom - btnRect.bottom;
-        const estimatedTooltipHeight = 160;
-        setFlipUp(spaceBelow < estimatedTooltipHeight);
+
+        const updatePosition = () => {
+            if (!buttonRef.current) return;
+            const rect = buttonRef.current.getBoundingClientRect();
+            const tooltipWidth = 416;
+            const estimatedTooltipHeight = 260;
+            const gap = 8;
+            const viewportPadding = 12;
+            const maxLeft = Math.max(
+                viewportPadding,
+                window.innerWidth - tooltipWidth - viewportPadding,
+            );
+            const spaceBelow = window.innerHeight - rect.bottom;
+            const shouldFlipUp =
+                spaceBelow < estimatedTooltipHeight + gap &&
+                rect.top > estimatedTooltipHeight + gap;
+
+            setFlipUp(shouldFlipUp);
+            setTooltipPosition({
+                left: Math.min(
+                    Math.max(rect.left, viewportPadding),
+                    maxLeft,
+                ),
+                top: shouldFlipUp
+                    ? Math.max(viewportPadding, rect.top - estimatedTooltipHeight - gap)
+                    : Math.min(
+                          rect.bottom + gap,
+                          window.innerHeight - viewportPadding,
+                      ),
+            });
+        };
+
+        updatePosition();
+        window.addEventListener("scroll", updatePosition, true);
+        window.addEventListener("resize", updatePosition);
+        return () => {
+            window.removeEventListener("scroll", updatePosition, true);
+            window.removeEventListener("resize", updatePosition);
+        };
     }, [showTooltip]);
 
     const skillAffinities = skill.affinityIds
@@ -5649,6 +6096,11 @@ function SkillChipWithTooltip({
             onDragStart={onDragStart}
             onMouseEnter={() => setHovered(true)}
             onMouseLeave={() => {
+                setHovered(false);
+                setShowTooltip(false);
+            }}
+            onFocus={() => setHovered(true)}
+            onBlur={() => {
                 setHovered(false);
                 setShowTooltip(false);
             }}
@@ -5675,8 +6127,12 @@ function SkillChipWithTooltip({
                     ))}
                 </span>
             </span>
-            {showTooltip ? (
-                <span className={`skill-tooltip ${flipUp ? "flip-up" : ""}`}>
+            {showTooltip && typeof document !== "undefined"
+                ? createPortal(
+                <span
+                    className={`skill-tooltip calculation-popover hover-card-portal ${flipUp ? "flip-up" : ""}`}
+                    style={{ left: tooltipPosition.left, top: tooltipPosition.top }}
+                >
                     <strong>{skill.name}</strong>
                     <span className={rarityClass(skill.rarity)}>
                         {skill.rarity}
@@ -5690,6 +6146,20 @@ function SkillChipWithTooltip({
                     ) : (
                         <span className="race-type-tag">Unleveled</span>
                     )}
+                    <span className="skill-tooltip-meta">
+                        <span>
+                            <strong>MP Cost</strong>
+                            {skill.mpCost ?? "Average"}
+                        </span>
+                        <span>
+                            <strong>Cooldown</strong>
+                            {skill.cooldown ?? "Instant"}
+                        </span>
+                        <span>
+                            <strong>Casting Time</strong>
+                            {skill.castingTime ?? "Instant"}
+                        </span>
+                    </span>
                     {skillAffinities.length > 0 ? (
                         <span className="skill-tooltip-affinities">
                             {skillAffinities.map((aff) => (
@@ -5709,8 +6179,10 @@ function SkillChipWithTooltip({
                     <span className="skill-tooltip-desc">
                         {skill.description}
                     </span>
-                </span>
-            ) : null}
+                </span>,
+                document.body,
+            )
+                : null}
         </button>
     );
 }
@@ -5724,12 +6196,13 @@ function DefinitionChipWithTooltip({
 }) {
     const [hovered, setHovered] = useState(false);
     const [showTooltip, setShowTooltip] = useState(false);
+    const [tooltipPosition, setTooltipPosition] = useState({ left: 0, top: 0 });
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const buttonRef = useRef<HTMLButtonElement | null>(null);
 
     useEffect(() => {
         if (hovered) {
-            timerRef.current = setTimeout(() => setShowTooltip(true), 2000);
+            timerRef.current = setTimeout(() => setShowTooltip(true), HOVER_CARD_DELAY_MS);
         } else {
             if (timerRef.current) clearTimeout(timerRef.current);
             setShowTooltip(false);
@@ -5738,6 +6211,48 @@ function DefinitionChipWithTooltip({
             if (timerRef.current) clearTimeout(timerRef.current);
         };
     }, [hovered]);
+
+    useEffect(() => {
+        if (!showTooltip || !buttonRef.current) return;
+
+        const updatePosition = () => {
+            if (!buttonRef.current) return;
+            const rect = buttonRef.current.getBoundingClientRect();
+            const tooltipWidth = 384;
+            const estimatedTooltipHeight = 180;
+            const gap = 8;
+            const viewportPadding = 12;
+            const maxLeft = Math.max(
+                viewportPadding,
+                window.innerWidth - tooltipWidth - viewportPadding,
+            );
+            const spaceBelow = window.innerHeight - rect.bottom;
+            const shouldFlipUp =
+                spaceBelow < estimatedTooltipHeight + gap &&
+                rect.top > estimatedTooltipHeight + gap;
+
+            setTooltipPosition({
+                left: Math.min(
+                    Math.max(rect.left, viewportPadding),
+                    maxLeft,
+                ),
+                top: shouldFlipUp
+                    ? Math.max(viewportPadding, rect.top - estimatedTooltipHeight - gap)
+                    : Math.min(
+                          rect.bottom + gap,
+                          window.innerHeight - viewportPadding,
+                      ),
+            });
+        };
+
+        updatePosition();
+        window.addEventListener("scroll", updatePosition, true);
+        window.addEventListener("resize", updatePosition);
+        return () => {
+            window.removeEventListener("scroll", updatePosition, true);
+            window.removeEventListener("resize", updatePosition);
+        };
+    }, [showTooltip]);
 
     const definitionRaceTypeLabel =
         definition.kind === "race" && definition.raceType
@@ -5753,6 +6268,11 @@ function DefinitionChipWithTooltip({
             onDragStart={onDragStart}
             onMouseEnter={() => setHovered(true)}
             onMouseLeave={() => {
+                setHovered(false);
+                setShowTooltip(false);
+            }}
+            onFocus={() => setHovered(true)}
+            onBlur={() => {
                 setHovered(false);
                 setShowTooltip(false);
             }}
@@ -5773,8 +6293,12 @@ function DefinitionChipWithTooltip({
                     </span>
                 </span>
             </span>
-            {showTooltip ? (
-                <span className="definition-tooltip">
+            {showTooltip && typeof document !== "undefined"
+                ? createPortal(
+                <span
+                    className="definition-tooltip calculation-popover hover-card-portal"
+                    style={{ left: tooltipPosition.left, top: tooltipPosition.top }}
+                >
                     <strong>{definition.name}</strong>
                     {definitionRaceTypeLabel ? (
                         <span className="race-type-tag">
@@ -5790,14 +6314,17 @@ function DefinitionChipWithTooltip({
                     <span className="skill-tooltip-desc">
                         {definition.description}
                     </span>
-                </span>
-            ) : null}
+                </span>,
+                document.body,
+            )
+                : null}
         </button>
     );
 }
 
 function ItemCompendium({
     items,
+    tierDefinitions,
     rarityDefinitions,
     skills,
     affinityDefinitions,
@@ -5806,6 +6333,7 @@ function ItemCompendium({
     onChange,
 }: {
     items: ItemDefinition[];
+    tierDefinitions: TierDefinition[];
     rarityDefinitions: RarityDefinition[];
     skills: SkillDefinition[];
     affinityDefinitions: AffinityDefinition[];
@@ -5859,6 +6387,7 @@ function ItemCompendium({
     );
     const isCommon = selected?.rarity === "Common";
     const rarityOptions = rarityNames(rarityDefinitions);
+    const maxTier = maxConfiguredTier(tierDefinitions);
     const toggleAffinity = (affinityId: string) => {
         if (!selected) return;
         const has = selected.affinityIds.includes(affinityId);
@@ -5992,7 +6521,7 @@ function ItemCompendium({
                                 <button
                                     type="button"
                                     className="stepper-btn"
-                                    disabled={selected.tier >= 10}
+                                    disabled={selected.tier >= maxTier}
                                     onClick={() =>
                                         update(selected.id, (item) => ({
                                             ...item,
@@ -6338,7 +6867,7 @@ function SystemPath({
     characterTypeDefinitions: CharacterTypeDefinition[];
     rarityDefinitions: RarityDefinition[];
 }) {
-    const milestones = sortedPath(character);
+    const milestones = sortedPath(character, tierDefinitions);
 
     function getPathTrackStatSummary(
         track: TierTrackSelection & { level?: number },
@@ -6449,6 +6978,9 @@ function SystemPath({
                                     <span>max {rule.maxLevel}</span>
                                 </h3>
                                 <p>{rule.details}</p>
+                                <p className="muted small">
+                                    Static tier bonus: +{displayNumber(rule.staticBonus)} to all stats
+                                </p>
 
                                 {/* Race / Class / Job stat summaries */}
                                 {tierData ? (

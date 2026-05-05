@@ -4,7 +4,7 @@ Only humanoids and some half-monsters have classes. These can range from things 
 # Leveling Up
 When someone levels up in a class, they receive a bonus to their statistics based on the class's stat-growth ratio, the actual tier record the class is assigned to, and rarity. The tier used here is not the class template's minimum available tier.
 
-Class level-up points: `(Tier * 2) * 10 * Rarity Multiplier`.
+Class level-up points: `Tier Class Multiplier * Rarity Multiplier`.
 
 Rarity multiplier:
 * Common: 1

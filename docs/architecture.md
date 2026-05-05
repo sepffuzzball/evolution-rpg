@@ -20,7 +20,7 @@ flowchart LR
 
 - `src/App.tsx`: Main UI, roster, wizard, sheet, item/skill editors, and path visualization.
 - `src/types.ts`: Character, track, stat, skill, item, player, and app-state types.
-- `src/data.ts`: RPG constants, tier rules, stat labels, default character type and rarity definitions, default Compendium templates, default character creation, and rule helpers.
+- `src/data.ts`: RPG constants, stat labels, default tier/character type/rarity definitions, default Compendium templates, default character creation, and rule helpers.
 - `src/storage.ts`: Browser API client, state sanitization, empty shared-state creation, and JSON import/export.
 - `src/styles.css`: Dark System-window visual design.
 - `server/index.js`: Combined static file server and JSON API.
@@ -41,7 +41,7 @@ flowchart LR
 - The top tabs switch between sheet, creation/editing, System path, and Compendium views.
 - The creation wizard normalizes race/class/job availability based on character type and assigns templates via drag/drop.
 - Compendium radar charts capture stat-growth ratios; formulas convert those ratios into stat points during level-up.
-- The Compendium also owns character type multipliers, rarity, affinity, skill, and item templates. Character type definitions are stored in shared state with kind, label, and multiplier. Rarity definitions are stored in shared state with name, multiplier, and color; item templates calculate equipment bonuses from tier, rarity, and radar ratios and can reference skill templates for item skills.
+- The Compendium also owns tier definitions, character type multipliers, rarity, affinity, skill, and item templates. Tier definitions are stored in shared state with number, title, details, max level, race/class/job/item multipliers, and static tier bonus. Character type definitions are stored in shared state with kind, label, and multiplier. Rarity definitions are stored in shared state with name, multiplier, and color; item templates calculate equipment bonuses from tier, rarity, and radar ratios and can reference skill templates for item skills.
 
 ## External dependencies
 

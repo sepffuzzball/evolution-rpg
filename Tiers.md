@@ -1,5 +1,17 @@
 # Tier to Level Ranking
-When tiering up, the character's level resets back to 1 (but being such a high tier denotes general power anyhow)
+When tiering up, the character's level resets back to 1 (but being such a high tier denotes general power anyhow). Tier definitions are stored in the shared ledger and can be edited from the app Compendium's Tiers tab, including adding additional tiers.
+
+Each tier definition includes:
+
+- Tier number
+- Max level
+- Title
+- Description/details
+- Race multiplier (default `Tier * 20`)
+- Class multiplier (default `Tier * 20`)
+- Job multiplier (default `Tier * 20`)
+- Item multiplier (default `Tier * 10`)
+- Static tier bonus added to every stat when the tier is reached (default `Tier * 10`)
 
 | Tier | Max Level | Title | Details |
 |:-----:|:-----:|:-----:|:-----|

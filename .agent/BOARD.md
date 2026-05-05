@@ -12,6 +12,82 @@
 
 ## Done
 
+### TASK-011: Enforce creator item skill slots and race notices
+
+- Status: Done
+- Priority: P1
+- Owner/agent: orchestrator with explorer support
+- Links: `src/App.tsx`
+- Acceptance criteria:
+  - Character creation item skill toggles cannot set more item skills than the character's current tier.
+  - Existing item skill limit enforcement handles multi-skill items using `setSkillNames`.
+  - Humanoid class/job level-ups enqueue a race level-up popup when the derived race average also increases.
+  - Race level-up popup is read after the class/job popup.
+- Notes/progress: Added shared item skill counting, creator-side item skill slot disabling/enforcement, multi-skill-aware limit trimming, queued level-up notices, and humanoid race notices after class/job level-up notices. Validation remains blocked by missing TypeScript language server and Windows npm resolving through `cmd.exe` from the WSL UNC path.
+
+### TASK-010: Correct sheet totals and item skill access
+
+- Status: Done
+- Priority: P1
+- Owner/agent: orchestrator with explorer support
+- Links: `src/App.tsx`, `src/styles.css`
+- Acceptance criteria:
+  - Character totals and stat breakdowns no longer add/display base stats.
+  - Sheet stat parentheticals show equipment bonus only.
+  - Set item skills appear in the character sheet skill lists.
+  - Character sheet supports quick searching and adding items from the item compendium.
+- Notes/progress: Removed `character.baseStats` from `calculateTotals`, removed the Base stats row from breakdown popups, simplified stat parentheticals to `+eq`, derived set item skills into Active/Passive skill lists, and added a quick item search/add panel above sheet items. Validation remains blocked by missing TypeScript/CSS language servers and Windows npm resolving through `cmd.exe` from the WSL UNC path.
+
+### TASK-009: Keep selection hover cards above all content
+
+- Status: Done
+- Priority: P2
+- Owner/agent: orchestrator with explorer support
+- Links: `src/App.tsx`, `src/styles.css`
+- Acceptance criteria:
+  - Race/class/job and skill hover cards render above all app panels and scroll containers.
+  - Hover cards appear faster than the previous two-second delay.
+  - Skill hover cards show MP Cost, Cooldown, and Casting Time.
+- Notes/progress: Moved skill and definition hover cards into `document.body` via React portals with fixed viewport positioning and maximum z-index, reduced hover delay to 450ms, and added skill timing/cost metadata. Validation remains blocked by missing TypeScript/CSS language servers and Windows npm resolving through `cmd.exe` from the WSL UNC path.
+
+### TASK-008: Unify sheet calculation popups and hover cards
+
+- Status: Done
+- Priority: P2
+- Owner/agent: orchestrator with explorer support
+- Links: `src/App.tsx`, `src/styles.css`
+- Acceptance criteria:
+  - Stat breakdown popups stack above lower character sheet panels.
+  - HP and MP show calculation popups with the same visual style as stat breakdowns.
+  - Race/class/job and skill selection hover cards reuse the calculation popup treatment.
+- Notes/progress: Added sheet panel z-index/isolation layering, HP/MP focusable breakdown rows, shared `.calculation-popover` styling, and focus support for skill/definition hover cards. Validation remains blocked by missing TypeScript/CSS language servers and Windows npm resolving through `cmd.exe` from the WSL UNC path.
+
+### TASK-007: Add stat calculation hover breakdowns
+
+- Status: Done
+- Priority: P2
+- Owner/agent: orchestrator with designer support
+- Links: `src/App.tsx`, `src/styles.css`
+- Acceptance criteria:
+  - Hovering or focusing a character sheet stat shows a calculation popup.
+  - Popup breaks the selected stat down by tier rows and tier bonus/race/class/job/items columns.
+  - Popup includes passive bonuses, tier-derived total, and calculated total.
+- Notes/progress: Added stat breakdown helpers, per-stat focusable hover popovers, and table styling. Also removed duplicate legacy `raceBonuses` contribution from total calculation so displayed totals align with the formula-backed breakdown. Validation remains blocked by missing TypeScript/CSS language servers and missing Linux Node.js/tsc in this environment.
+
+### TASK-006: Make tiers database-backed with static bonuses
+
+- Status: Done
+- Priority: P1
+- Owner/agent: orchestrator with explorer support
+- Links: `src/types.ts`, `src/data.ts`, `src/storage.ts`, `src/App.tsx`, `README.md`, `StatSheet.md`, `Tiers.md`, `docs/architecture.md`
+- Acceptance criteria:
+  - Tier definitions are stored in shared state with number, title, details, max level, race/class/job/item multipliers, and static tier bonus.
+  - Default tier multipliers preserve race/class/job `Tier * 20`, item `Tier * 10`, and static tier bonus `Tier * 10`.
+  - Growth, item bonuses, max-level UI, creation, review, and path rendering read tier definitions dynamically.
+  - Static tier bonuses are included in sheet totals and shown in creation/path tier summaries.
+  - Compendium exposes a Tiers editor and supports additional tiers.
+- Notes/progress: Added `tierDefinitions` to `AppState`, sanitization, default seed data, Tiers compendium tab, dynamic max-level/tier-bound handling, tier multiplier formula wiring, and cumulative static tier bonuses. Validation remains blocked by missing TypeScript language server and missing Linux Node.js/tsc in this environment.
+
 ### TASK-005: Update stat point formulas
 
 - Status: Done

@@ -37,16 +37,19 @@ Rarity multipliers are stored in the shared ledger and managed from the Compendi
 
 Character type multipliers are also stored in the shared ledger and managed from the Compendium's Types tab.
 
-- Race level-up points: `Character Type × (Tier × 2) × 10 × Rarity`
+Tier definitions are stored in the shared ledger and managed from the Compendium's Tiers tab. Each tier defines its number, title, description, max level, race/class/job/item multipliers, and static tier bonus. Defaults preserve the old formulas: race/class/job multipliers are `Tier × 20`, item multipliers are `Tier × 10`, and static tier bonuses are `Tier × 10`.
+
+- Race level-up points: `Character Type × Tier Race Multiplier × Rarity`
   - Humanoid = `1`
   - Half-monster = `2`
   - Monster = `3`
-- Class or Job level-up points: `(Tier × 2) × 10 × Rarity`
+- Class level-up points: `Tier Class Multiplier × Rarity`
+- Job level-up points: `Tier Job Multiplier × Rarity`
 
 Compendium radar charts define stat ratios only. The formulas calculate actual points at level-up time. For race/class/job tracks, `Tier` is the actual tier record the track is assigned to; it is not the template's minimum available tier.
 Each level in a track contributes one full point pool, including level 1.
 
-Item stat bonuses use `Item Tier × 10 × Rarity` and the item's radar-chart ratio. Item templates can hold item skills based on rarity order: Common 0, Uncommon 1, Rare 2, Epic 3, Legendary 4, Mythical 5, and Divine 6 by default.
+Item stat bonuses use `Tier Item Multiplier × Rarity` and the item's radar-chart ratio. Static tier bonuses add to every stat at the start of each reached tier. Item templates can hold item skills based on rarity order: Common 0, Uncommon 1, Rare 2, Epic 3, Legendary 4, Mythical 5, and Divine 6 by default.
 
 ## Tech stack
 

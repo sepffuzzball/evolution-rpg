@@ -4,7 +4,7 @@ Only humanoids and some half-monsters have jobs. These can range from things lik
 # Leveling Up
 When someone levels up in a job, they receive a bonus to their statistics based on the job's stat-growth ratio, the actual tier record the job is assigned to, and rarity. The tier used here is not the job template's minimum available tier.
 
-Job level-up points: `(Tier * 2) * 10 * Rarity Multiplier`.
+Job level-up points: `Tier Job Multiplier * Rarity Multiplier`.
 
 Rarity multiplier:
 * Common: 1

@@ -245,7 +245,7 @@ function sanitizeSkillDefinition(value: unknown): SkillDefinition | null {
     id: stringValue(value.id, makeId('skill-definition')),
     name: stringValue(value.name, 'Unnamed Skill'),
     rarity: rarityValue(value.rarity, 'Common'),
-    minTier: Math.round(numberValue(value.minTier, 1, 1, 10)),
+    minTier: Math.round(numberValue(value.minTier, 1, 1, maxConfiguredTier())),
     description: stringValue(value.description, ''),
     kind: optionValue(value.kind, skillKinds, 'Active'),
     levelled: Boolean(value.levelled),
@@ -351,7 +351,7 @@ function sanitizePath(value: unknown): PathMilestone | null {
   if (!isRecord(value)) return null;
   return {
     id: stringValue(value.id, makeId('path')),
-    tier: Math.round(numberValue(value.tier, 1, 1, 10)),
+    tier: Math.round(numberValue(value.tier, 1, 1, maxConfiguredTier())),
     label: stringValue(value.label, 'Unrecorded Milestone'),
     rarity: rarityValue(value.rarity, 'Common'),
     source: optionValue(value.source, [...skillSources, 'System'] as const, 'System'),

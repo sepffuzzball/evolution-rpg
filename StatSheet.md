@@ -18,15 +18,16 @@ On a stat sheet, the total stats should be shown but the bonus from the current 
 
 ### Stat Growth Formulas
 
-Race, class, job, and item stat point pools are calculated first, then distributed across stats by the template's radar-chart ratio. For race, class, and job level-ups, `Tier` means the actual tier record the track is assigned to, not the template's minimum available tier and not always the character's latest tier.
-Each level in a track contributes one full level-up point pool, including level 1. For example, a level 10 Tier 1 Common Humanoid race contributes 10 pools of `1 * (1 * 2) * 10 * 1 = 20`, for 200 total points before stat-ratio distribution.
+Race, class, job, and item stat point pools are calculated first, then distributed across stats by the template's radar-chart ratio. For race, class, and job level-ups, `Tier` means the actual tier record the track is assigned to, not the template's minimum available tier and not always the character's latest tier. Tier definitions live in the Compendium and provide editable race/class/job/item multipliers.
+Each level in a track contributes one full level-up point pool, including level 1. For example, a level 10 Tier 1 Common Humanoid race contributes 10 pools of `1 * 20 * 1 = 20`, for 200 total points before stat-ratio distribution.
 
-- Race level-up points: `Character Type Multiplier * (Tier * 2) * 10 * Rarity Multiplier`.
-- Class level-up points: `(Tier * 2) * 10 * Rarity Multiplier`.
-- Job level-up points: `(Tier * 2) * 10 * Rarity Multiplier`.
-- Item stat points: `Tier * 10 * Rarity Multiplier`.
+- Race level-up points: `Character Type Multiplier * Tier Race Multiplier * Rarity Multiplier`.
+- Class level-up points: `Tier Class Multiplier * Rarity Multiplier`.
+- Job level-up points: `Tier Job Multiplier * Rarity Multiplier`.
+- Item stat points: `Tier Item Multiplier * Rarity Multiplier`.
+- Static tier bonus: each reached tier adds its tier bonus to every stat. Defaults use `Tier * 10`.
 
-Character Type and Rarity multipliers are managed from the app Compendium and stored with the shared ledger.
+Character Type, Tier, and Rarity multipliers are managed from the app Compendium and stored with the shared ledger.
 
 ### Physical
 Strength - A character's physical strength, the ability to push, pull, swing, etc.
