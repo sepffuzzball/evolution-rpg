@@ -15,14 +15,14 @@ The app makes those constraints visible while giving each character a persistent
 ## Features
 
 - Multi-player / multi-character roster.
-- Compendium for reusable Race, Class, Job, Affinity, Skill, and Item templates.
+- Compendium for reusable Race, Class, Job, stat metadata/formulas, Affinity, Skill, and Item templates.
 - Guided character creation and editing wizard.
 - Drag/drop Race, Class, and Job assignment during character creation or tier-up.
 - Draggable radar/spider chart editors for stat-growth ratios; raw ratio values are hidden from players.
 - Humanoid, monster, and half-monster rule gating.
 - Race, class, job, tier, level, and staged EXP tracking.
 - Read-only levels and 10-stage EXP bars with +/- controls; filling the bar automatically levels the track or skill.
-- HP and MP calculations from the stat-sheet rules.
+- Database-backed secondary stat calculations, including HP, MP, SP, and DP defaults.
 - Active and passive skill tracking with source, rarity, level, staged EXP, MP cost, casting time, and cooldown.
 - Item tracking with equipment slot type, rarity, stat bonuses, and item skill set state.
 - Item skill limit display based on character tier.
@@ -36,6 +36,8 @@ The app makes those constraints visible while giving each character a persistent
 Rarity multipliers are stored in the shared ledger and managed from the Compendium's Rarities tab. Defaults are Common `1`, Uncommon `1.5`, Rare `2`, Epic `2.5`, Legendary `3`, Mythical `3.5`, and Divine `4`.
 
 Character type multipliers are also stored in the shared ledger and managed from the Compendium's Types tab.
+
+Stat categories, primary stat labels/roles, and secondary stat formulas are stored in the shared ledger and managed from the Compendium's Stat Categories, Primary Stats, and Secondary Stats tabs. HP remains `(Fortitude × Current Tier) + Strength`, MP remains `(Mana × Current Tier) + Intelligence`, SP defaults to `(Fortitude × Current Tier) + Agility`, and DP defaults to `(Charisma × Current Tier) + Wisdom`.
 
 Tier definitions are stored in the shared ledger and managed from the Compendium's Tiers tab. Each tier defines its number, title, description, max level, race/class/job/item multipliers, and static tier bonus. Defaults preserve the old formulas: race/class/job multipliers are `Tier × 20`, item multipliers are `Tier × 10`, and static tier bonuses are `Tier × 10`.
 

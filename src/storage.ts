@@ -1,4 +1,4 @@
-import { clampPercent, createCharacter, DEFAULT_AFFINITIES, DEFAULT_CHARACTER_TYPE_DEFINITIONS, DEFAULT_CURRENCIES, DEFAULT_DEFINITIONS, DEFAULT_ITEM_DEFINITIONS, DEFAULT_RARITY_DEFINITIONS, DEFAULT_SKILL_DEFINITIONS, DEFAULT_TIER_DEFINITIONS, EMPTY_STATS, makeId, RARITIES, tierRule } from './data';
+import { clampPercent, createCharacter, DEFAULT_AFFINITIES, DEFAULT_CHARACTER_TYPE_DEFINITIONS, DEFAULT_CURRENCIES, DEFAULT_DEFINITIONS, DEFAULT_ITEM_DEFINITIONS, DEFAULT_PRIMARY_STAT_DEFINITIONS, DEFAULT_RARITY_DEFINITIONS, DEFAULT_SECONDARY_STAT_DEFINITIONS, DEFAULT_SKILL_DEFINITIONS, DEFAULT_STAT_CATEGORIES, DEFAULT_TIER_DEFINITIONS, EMPTY_STATS, makeId, RARITIES, STAT_LABELS, tierRule } from './data';
 import type {
   AdvancementDefinition,
   AffinityDefinition,
@@ -16,13 +16,17 @@ import type {
   LevelTrack,
   PathMilestone,
   Player,
+  PrimaryStatDefinition,
+  PrimaryStatRole,
   Rarity,
   RarityDefinition,
+  SecondaryStatDefinition,
   Skill,
   SkillDefinition,
   SkillKind,
   SkillSource,
   StatBlock,
+  StatCategoryDefinition,
   StatKey,
   TierDefinition,
 } from './types';
@@ -36,6 +40,7 @@ const definitionKinds: DefinitionKind[] = ['race', 'class', 'job'];
 const skillKinds: SkillKind[] = ['Active', 'Passive'];
 const skillSources: SkillSource[] = ['Race', 'Class', 'Job', 'Item', 'Other'];
 const itemSlots: ItemSlot[] = ['Armor', 'Accessory', 'Weapon', 'Other'];
+const primaryStatRoles: PrimaryStatRole[] = ['aggressive', 'defensive'];
 let availableRarities: Rarity[] = RARITIES;
 let availableTierDefinitions: TierDefinition[] = DEFAULT_TIER_DEFINITIONS;
 
@@ -139,6 +144,83 @@ function sanitizeTierDefinitions(value: unknown): TierDefinition[] {
   const byTier = new Map<number, TierDefinition>();
   [...DEFAULT_TIER_DEFINITIONS, ...imported].forEach((definition) => byTier.set(definition.tier, definition));
   return [...byTier.values()].sort((a, b) => a.tier - b.tier);
+}
+
+function statKeyValue(value: unknown, fallback: StatKey): StatKey {
+  return optionValue(value, statKeys, fallback);
+}
+
+function sanitizeStatCategoryDefinition(value: unknown): StatCategoryDefinition | null {
+  if (!isRecord(value)) return null;
+  const name = stringValue(value.name, '').trim();
+  if (!name) return null;
+  return {
+    id: stringValue(value.id, makeId('stat-category')),
+    name,
+    description: stringValue(value.description, ''),
+    order: Math.round(numberValue(value.order, 1, 1, 999)),
+  };
+}
+
+function sanitizeStatCategoryDefinitions(value: unknown): StatCategoryDefinition[] {
+  const imported = Array.isArray(value)
+    ? value.map(sanitizeStatCategoryDefinition).filter((entry): entry is StatCategoryDefinition => Boolean(entry))
+    : [];
+  const byId = new Map<string, StatCategoryDefinition>();
+  [...DEFAULT_STAT_CATEGORIES, ...imported].forEach((definition) => byId.set(definition.id, definition));
+  return [...byId.values()].sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+}
+
+function sanitizePrimaryStatDefinition(value: unknown): PrimaryStatDefinition | null {
+  if (!isRecord(value)) return null;
+  const key = statKeyValue(value.key, 'strength');
+  const fallback = DEFAULT_PRIMARY_STAT_DEFINITIONS.find((definition) => definition.key === key);
+  return {
+    id: stringValue(value.id, fallback?.id ?? `primary-stat-${key}`),
+    key,
+    label: stringValue(value.label, fallback?.label ?? STAT_LABELS[key]),
+    categoryId: stringValue(value.categoryId, fallback?.categoryId ?? DEFAULT_STAT_CATEGORIES[0].id),
+    role: optionValue(value.role, primaryStatRoles, fallback?.role ?? 'defensive'),
+    description: stringValue(value.description, fallback?.description ?? ''),
+    order: Math.round(numberValue(value.order, fallback?.order ?? 1, 1, 999)),
+  };
+}
+
+function sanitizePrimaryStatDefinitions(value: unknown): PrimaryStatDefinition[] {
+  const imported = Array.isArray(value)
+    ? value.map(sanitizePrimaryStatDefinition).filter((entry): entry is PrimaryStatDefinition => Boolean(entry))
+    : [];
+  const byKey = new Map<StatKey, PrimaryStatDefinition>();
+  [...DEFAULT_PRIMARY_STAT_DEFINITIONS, ...imported].forEach((definition) => byKey.set(definition.key, definition));
+  return statKeys
+    .map((key) => byKey.get(key) ?? DEFAULT_PRIMARY_STAT_DEFINITIONS.find((definition) => definition.key === key))
+    .filter((entry): entry is PrimaryStatDefinition => Boolean(entry));
+}
+
+function sanitizeSecondaryStatDefinition(value: unknown): SecondaryStatDefinition | null {
+  if (!isRecord(value)) return null;
+  const key = stringValue(value.key, '').trim().toLowerCase();
+  if (!key) return null;
+  const fallback = DEFAULT_SECONDARY_STAT_DEFINITIONS.find((definition) => definition.key === key);
+  return {
+    id: stringValue(value.id, fallback?.id ?? makeId('secondary-stat')),
+    key,
+    shortName: stringValue(value.shortName, fallback?.shortName ?? key.toUpperCase()),
+    longName: stringValue(value.longName, fallback?.longName ?? key.toUpperCase()),
+    description: stringValue(value.description, fallback?.description ?? ''),
+    multipliedStat: statKeyValue(value.multipliedStat, fallback?.multipliedStat ?? 'fortitude'),
+    addedStat: statKeyValue(value.addedStat, fallback?.addedStat ?? 'strength'),
+    order: Math.round(numberValue(value.order, fallback?.order ?? 1, 1, 999)),
+  };
+}
+
+function sanitizeSecondaryStatDefinitions(value: unknown): SecondaryStatDefinition[] {
+  const imported = Array.isArray(value)
+    ? value.map(sanitizeSecondaryStatDefinition).filter((entry): entry is SecondaryStatDefinition => Boolean(entry))
+    : [];
+  const byKey = new Map<string, SecondaryStatDefinition>();
+  [...DEFAULT_SECONDARY_STAT_DEFINITIONS, ...imported].forEach((definition) => byKey.set(definition.key, definition));
+  return [...byKey.values()].sort((a, b) => a.order - b.order || a.shortName.localeCompare(b.shortName));
 }
 
 function sanitizeStats(value: unknown, fallback: Partial<StatBlock>, fillMissing = false): Partial<StatBlock> {
@@ -384,6 +466,12 @@ function sanitizeCharacter(value: unknown, players: Player[]): Character | null 
     playerId,
     name: stringValue(value.name, fallback.name),
     age: stringValue(value.age, fallback.age),
+    size: stringValue(value.size, fallback.size),
+    build: stringValue(value.build, fallback.build),
+    pronouns: stringValue(value.pronouns, fallback.pronouns),
+    gender: stringValue(value.gender, fallback.gender),
+    sexualPreference: stringValue(value.sexualPreference, fallback.sexualPreference),
+    appearance: stringValue(value.appearance, fallback.appearance),
     kind,
     halfMonsterFocus: kind === 'half-monster' ? focus : undefined,
     currentTier: tier,
@@ -421,6 +509,9 @@ function sanitizeState(value: unknown): AppState {
   const tierDefinitions = sanitizeTierDefinitions(value.tierDefinitions);
   availableTierDefinitions = tierDefinitions;
   const characterTypeDefinitions = sanitizeCharacterTypeDefinitions(value.characterTypeDefinitions);
+  const statCategoryDefinitions = sanitizeStatCategoryDefinitions(value.statCategoryDefinitions);
+  const primaryStatDefinitions = sanitizePrimaryStatDefinitions(value.primaryStatDefinitions);
+  const secondaryStatDefinitions = sanitizeSecondaryStatDefinitions(value.secondaryStatDefinitions);
   const rarityDefinitions = sanitizeRarityDefinitions(value.rarityDefinitions);
   availableRarities = rarityDefinitions.map((definition) => definition.name);
   const definitions = sanitizeDefinitions(value.definitions);
@@ -432,21 +523,24 @@ function sanitizeState(value: unknown): AppState {
     ? value.characters.map((character) => sanitizeCharacter(character, players)).filter((character): character is Character => Boolean(character))
     : [];
   if (!characters.length) {
-    return { players, characters: [], tierDefinitions, characterTypeDefinitions, definitions, rarityDefinitions, affinityDefinitions, currencyDefinitions, skillDefinitions, itemDefinitions, selectedCharacterId: undefined };
+    return { players, characters: [], tierDefinitions, characterTypeDefinitions, statCategoryDefinitions, primaryStatDefinitions, secondaryStatDefinitions, definitions, rarityDefinitions, affinityDefinitions, currencyDefinitions, skillDefinitions, itemDefinitions, selectedCharacterId: undefined };
   }
   const selectedCharacterId = characters.some((character) => character.id === value.selectedCharacterId)
     ? stringValue(value.selectedCharacterId, characters[0].id)
     : characters[0].id;
-  return { players, characters, tierDefinitions, characterTypeDefinitions, definitions, rarityDefinitions, affinityDefinitions, currencyDefinitions, skillDefinitions, itemDefinitions, selectedCharacterId };
+  return { players, characters, tierDefinitions, characterTypeDefinitions, statCategoryDefinitions, primaryStatDefinitions, secondaryStatDefinitions, definitions, rarityDefinitions, affinityDefinitions, currencyDefinitions, skillDefinitions, itemDefinitions, selectedCharacterId };
 }
 
 export function blankState(): AppState {
   const playerId = makeId('player');
   return {
-    players: [{ id: playerId, name: 'Table Group' }],
+    players: [{ id: playerId, name: 'Default Group' }],
     characters: [],
     tierDefinitions: DEFAULT_TIER_DEFINITIONS,
     characterTypeDefinitions: DEFAULT_CHARACTER_TYPE_DEFINITIONS,
+    statCategoryDefinitions: DEFAULT_STAT_CATEGORIES,
+    primaryStatDefinitions: DEFAULT_PRIMARY_STAT_DEFINITIONS,
+    secondaryStatDefinitions: DEFAULT_SECONDARY_STAT_DEFINITIONS,
     definitions: DEFAULT_DEFINITIONS,
     rarityDefinitions: DEFAULT_RARITY_DEFINITIONS,
     affinityDefinitions: DEFAULT_AFFINITIES,

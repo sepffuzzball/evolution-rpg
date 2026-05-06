@@ -7,10 +7,13 @@ import type {
     CurrencyDefinition,
     HalfMonsterFocus,
     ItemDefinition,
+    PrimaryStatDefinition,
     Rarity,
     RarityDefinition,
+    SecondaryStatDefinition,
     SkillDefinition,
     StatBlock,
+    StatCategoryDefinition,
     StatKey,
     TierDefinition,
     TierProgression,
@@ -157,6 +160,71 @@ export const STAT_LABELS: Record<StatKey, string> = {
     perception: "Perception",
     stealth: "Stealth",
 };
+
+export const DEFAULT_STAT_CATEGORIES: StatCategoryDefinition[] = STAT_GROUPS.map((group, index) => ({
+    id: `stat-category-${group.label.toLowerCase()}`,
+    name: group.label,
+    description: `${group.label} primary stats.`,
+    order: index + 1,
+}));
+
+const AGGRESSIVE_STATS: StatKey[] = ["strength", "dexterity", "intelligence", "charisma", "mana", "perception"];
+
+export const DEFAULT_PRIMARY_STAT_DEFINITIONS: PrimaryStatDefinition[] = STAT_GROUPS.flatMap((group) => {
+    const category = DEFAULT_STAT_CATEGORIES.find((entry) => entry.name === group.label)!;
+    return group.keys.map((key, index) => ({
+        id: `primary-stat-${key}`,
+        key,
+        label: STAT_LABELS[key],
+        categoryId: category.id,
+        role: AGGRESSIVE_STATS.includes(key) ? "aggressive" : "defensive",
+        description: `${STAT_LABELS[key]} primary stat.`,
+        order: index + 1,
+    }));
+});
+
+export const DEFAULT_SECONDARY_STAT_DEFINITIONS: SecondaryStatDefinition[] = [
+    {
+        id: "secondary-stat-hp",
+        key: "hp",
+        shortName: "HP",
+        longName: "Health Points",
+        description: "Physical vitality and damage capacity.",
+        multipliedStat: "fortitude",
+        addedStat: "strength",
+        order: 1,
+    },
+    {
+        id: "secondary-stat-mp",
+        key: "mp",
+        shortName: "MP",
+        longName: "Mana Points",
+        description: "Magical energy available for spells and techniques.",
+        multipliedStat: "mana",
+        addedStat: "intelligence",
+        order: 2,
+    },
+    {
+        id: "secondary-stat-sp",
+        key: "sp",
+        shortName: "SP",
+        longName: "Stamina Points",
+        description: "Physical stamina used for exertion and martial techniques.",
+        multipliedStat: "fortitude",
+        addedStat: "agility",
+        order: 3,
+    },
+    {
+        id: "secondary-stat-dp",
+        key: "dp",
+        shortName: "DP",
+        longName: "Divine Points",
+        description: "Divine presence and spiritual authority.",
+        multipliedStat: "charisma",
+        addedStat: "wisdom",
+        order: 4,
+    },
+];
 
 export const EMPTY_STATS: StatBlock = {
     strength: 10,
@@ -604,6 +672,12 @@ export function createCharacter(
         playerId,
         name: "New Character",
         age: kind === "monster" ? "0" : "10",
+        size: "",
+        build: "",
+        pronouns: "",
+        gender: "",
+        sexualPreference: "",
+        appearance: "",
         kind,
         halfMonsterFocus: kind === "half-monster" ? focus : undefined,
         currentTier: tier,

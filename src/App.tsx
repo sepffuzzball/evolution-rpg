@@ -8,17 +8,10 @@ import {
     makeId,
     RARITIES,
     RARITY_MULTIPLIERS,
-    STAT_GROUPS,
     STAT_LABELS,
     tierRule,
 } from "./data";
-import {
-    blankState,
-    exportState,
-    importState,
-    loadState,
-    saveState,
-} from "./storage";
+import { blankState, loadState, saveState } from "./storage";
 import type {
     AppState,
     AdvancementDefinition,
@@ -36,13 +29,17 @@ import type {
     LevelTrack,
     PathMilestone,
     Player,
+    PrimaryStatDefinition,
+    PrimaryStatRole,
     Rarity,
     RarityDefinition,
+    SecondaryStatDefinition,
     Skill,
     SkillDefinition,
     SkillKind,
     SkillSource,
     StatBlock,
+    StatCategoryDefinition,
     StatKey,
     TierDefinition,
     TierProgression,
@@ -80,8 +77,13 @@ function tierDefinition(
     );
 }
 
-function maxConfiguredTier(tierDefinitions: TierDefinition[] | undefined): number {
-    return Math.max(1, ...(tierDefinitions?.map((definition) => definition.tier) ?? [10]));
+function maxConfiguredTier(
+    tierDefinitions: TierDefinition[] | undefined,
+): number {
+    return Math.max(
+        1,
+        ...(tierDefinitions?.map((definition) => definition.tier) ?? [10]),
+    );
 }
 
 function maxLevelForTier(
@@ -91,7 +93,10 @@ function maxLevelForTier(
     const tierDefinitions = Array.isArray(tierDefinitionsOrTier)
         ? tierDefinitionsOrTier
         : undefined;
-    const tier = typeof tierDefinitionsOrTier === "number" ? tierDefinitionsOrTier : (maybeTier ?? 1);
+    const tier =
+        typeof tierDefinitionsOrTier === "number"
+            ? tierDefinitionsOrTier
+            : (maybeTier ?? 1);
     return tierDefinition(tierDefinitions, tier).maxLevel;
 }
 
@@ -102,6 +107,9 @@ type CompendiumTab =
     | DefinitionKind
     | "tier"
     | "character-type"
+    | "stat-category"
+    | "primary-stat"
+    | "secondary-stat"
     | "rarity"
     | "affinity"
     | "currency"
@@ -109,6 +117,89 @@ type CompendiumTab =
     | "item";
 
 const statKeys = Object.keys(EMPTY_STATS) as StatKey[];
+const primaryStatRoles: PrimaryStatRole[] = ["aggressive", "defensive"];
+
+function primaryStatDefinition(
+    primaryStats: PrimaryStatDefinition[] | undefined,
+    key: StatKey,
+): PrimaryStatDefinition {
+    return (
+        primaryStats?.find((stat) => stat.key === key) ?? {
+            id: `primary-stat-${key}`,
+            key,
+            label: STAT_LABELS[key],
+            categoryId: "",
+            role: "defensive",
+            description: "",
+            order: statKeys.indexOf(key) + 1,
+        }
+    );
+}
+
+function statLabel(
+    primaryStats: PrimaryStatDefinition[] | undefined,
+    key: StatKey,
+): string {
+    return primaryStatDefinition(primaryStats, key).label;
+}
+
+function sortedPrimaryStats(
+    categories: StatCategoryDefinition[],
+    primaryStats: PrimaryStatDefinition[],
+): PrimaryStatDefinition[] {
+    const categoryOrder = new Map(
+        categories.map((category) => [category.id, category.order] as const),
+    );
+    const roleOrder: Record<PrimaryStatRole, number> = {
+        aggressive: 0,
+        defensive: 1,
+    };
+    return [
+        ...statKeys.map((key) => primaryStatDefinition(primaryStats, key)),
+    ].sort(
+        (a, b) =>
+            roleOrder[a.role] - roleOrder[b.role] ||
+            (categoryOrder.get(a.categoryId) ?? 999) -
+                (categoryOrder.get(b.categoryId) ?? 999) ||
+            a.order - b.order ||
+            a.label.localeCompare(b.label),
+    );
+}
+
+function secondaryStatValue(
+    definition: SecondaryStatDefinition,
+    character: Character,
+    totals: StatBlock,
+): number {
+    return (
+        totals[definition.multipliedStat] * character.currentTier +
+        totals[definition.addedStat]
+    );
+}
+
+function currentTierData(character: Character): TierProgression | undefined {
+    return character.tiers.find((tier) => tier.status === "current");
+}
+
+function rosterRaceExperience(character: Character): number {
+    const tierData = currentTierData(character);
+    if (!tierData) return 0;
+    if (character.kind !== "humanoid")
+        return clampPercent(tierData.race.exp ?? 0);
+
+    const classLevel = tierData.classTrack?.level ?? 1;
+    const jobLevel = tierData.jobTrack?.level ?? 1;
+    const classExp = (tierData.classTrack as LevelTrack | undefined)?.exp ?? 0;
+    const jobExp = (tierData.jobTrack as LevelTrack | undefined)?.exp ?? 0;
+    const raceLevel = Math.floor((classLevel + jobLevel) / 2);
+    const trackLevelsTowardNextRaceLevel =
+        classLevel + jobLevel - raceLevel * 2;
+    const trackExpTowardNextRaceLevel = (classExp + jobExp) / 100;
+    return clampPercent(
+        ((trackLevelsTowardNextRaceLevel + trackExpTowardNextRaceLevel) / 2) *
+            100,
+    );
+}
 
 function titleCase(value: string): string {
     return value
@@ -270,7 +361,8 @@ function createRarityDefinition(): RarityDefinition {
 }
 
 function createTierDefinition(existing: TierDefinition[]): TierDefinition {
-    const tier = Math.max(0, ...existing.map((definition) => definition.tier)) + 1;
+    const tier =
+        Math.max(0, ...existing.map((definition) => definition.tier)) + 1;
     return {
         id: makeId("tier"),
         tier,
@@ -282,6 +374,35 @@ function createTierDefinition(existing: TierDefinition[]): TierDefinition {
         jobMultiplier: tier * 20,
         itemMultiplier: tier * 10,
         staticBonus: tier * 10,
+    };
+}
+
+function createStatCategoryDefinition(
+    existing: StatCategoryDefinition[],
+): StatCategoryDefinition {
+    return {
+        id: makeId("stat-category"),
+        name: "New Stat Category",
+        description: "Custom stat category.",
+        order:
+            Math.max(0, ...existing.map((definition) => definition.order)) + 1,
+    };
+}
+
+function createSecondaryStatDefinition(
+    existing: SecondaryStatDefinition[],
+): SecondaryStatDefinition {
+    const order =
+        Math.max(0, ...existing.map((definition) => definition.order)) + 1;
+    return {
+        id: makeId("secondary-stat"),
+        key: `secondary-${order}`,
+        shortName: "NS",
+        longName: "New Secondary Stat",
+        description: "Custom secondary stat.",
+        multipliedStat: "fortitude",
+        addedStat: "strength",
+        order,
     };
 }
 
@@ -416,7 +537,8 @@ function pointsForLevelUp(
             multiplier
         );
     }
-    if (definition.kind === "class") return tierDef.classMultiplier * multiplier;
+    if (definition.kind === "class")
+        return tierDef.classMultiplier * multiplier;
     return tierDef.jobMultiplier * multiplier;
 }
 
@@ -555,7 +677,11 @@ function itemFromDefinition(
         slot: definition.slot,
         tier: definition.tier,
         rarity: definition.rarity,
-        statBonuses: distributedItemBonuses(definition, tierDefinitions, rarityDefinitions),
+        statBonuses: distributedItemBonuses(
+            definition,
+            tierDefinitions,
+            rarityDefinitions,
+        ),
         skillName: skillNames[0] ?? "",
         skillNames,
         skillSet: false,
@@ -1031,12 +1157,18 @@ function normalizeProgression(
             classTrack: t.classTrack ?? {
                 name: "Page",
                 rarity: "Common" as const,
-                level: t.status === "completed" ? maxLevelForTier(tierDefinitions, t.tier) : 1,
+                level:
+                    t.status === "completed"
+                        ? maxLevelForTier(tierDefinitions, t.tier)
+                        : 1,
             },
             jobTrack: t.jobTrack ?? {
                 name: "Apprentice Apothecary",
                 rarity: "Common" as const,
-                level: t.status === "completed" ? maxLevelForTier(tierDefinitions, t.tier) : 1,
+                level:
+                    t.status === "completed"
+                        ? maxLevelForTier(tierDefinitions, t.tier)
+                        : 1,
             },
         }));
     }
@@ -1127,18 +1259,16 @@ function calculateTotals(
 ): StatBlock {
     return addStats(
         tierBonusStats(tierDefinitions, character.currentTier),
-        calculatedProgressionBonuses(character, definitions, tierDefinitions, characterTypeDefinitions, rarityDefinitions),
+        calculatedProgressionBonuses(
+            character,
+            definitions,
+            tierDefinitions,
+            characterTypeDefinitions,
+            rarityDefinitions,
+        ),
         character.passiveBonuses,
         equipmentBonuses(character.items),
     );
-}
-
-function hp(character: Character, totals: StatBlock): number {
-    return totals.fortitude * character.currentTier + totals.strength;
-}
-
-function mp(character: Character, totals: StatBlock): number {
-    return totals.mana * character.currentTier + totals.intelligence;
 }
 
 function trackLabel(character: Character): string {
@@ -1208,9 +1338,10 @@ function sortedPath(
                 milestone.notes === "Starting race granted by The System."
             ),
     );
-    return [...currentTrackMilestones(character, tierDefinitions), ...manualPath].sort(
-        (a, b) => a.tier - b.tier || a.label.localeCompare(b.label),
-    );
+    return [
+        ...currentTrackMilestones(character, tierDefinitions),
+        ...manualPath,
+    ].sort((a, b) => a.tier - b.tier || a.label.localeCompare(b.label));
 }
 
 function recalculateCharacter(
@@ -1253,7 +1384,11 @@ function recalculateCharacter(
         );
         if (!definition) return item;
 
-        const statBonuses = distributedItemBonuses(definition, tierDefinitions, rarityDefinitions);
+        const statBonuses = distributedItemBonuses(
+            definition,
+            tierDefinitions,
+            rarityDefinitions,
+        );
         const itemOldEntries = Object.entries(item.statBonuses).sort(
             ([a], [b]) => a.localeCompare(b),
         );
@@ -1295,12 +1430,13 @@ function rarityClass(rarity: Rarity): string {
 function App() {
     const [state, setState] = useState<AppState>(() => blankState());
     const [loadedSharedState, setLoadedSharedState] = useState(false);
-    const [storageStatus, setStorageStatus] = useState("Loading shared ledger…");
+    const [storageStatus, setStorageStatus] = useState(
+        "Loading shared ledger…",
+    );
     const [mode, setMode] = useState<ViewMode>("sheet");
     const [newPlayerName, setNewPlayerName] = useState("");
     const [draft, setDraft] = useState<Character | null>(null);
     const [wizardStep, setWizardStep] = useState<WizardStep>(0);
-    const [importError, setImportError] = useState("");
     const [levelUpNotices, setLevelUpNotices] = useState<LevelUpNotice[]>([]);
 
     useEffect(() => {
@@ -1440,20 +1576,26 @@ function App() {
     function updateDraft(updater: (current: Character) => Character): void {
         setDraft((current) =>
             current
-                ? normalizeProgression({
-                      ...updater(current),
-                      updatedAt: new Date().toISOString(),
-                  }, state.tierDefinitions)
+                ? normalizeProgression(
+                      {
+                          ...updater(current),
+                          updatedAt: new Date().toISOString(),
+                      },
+                      state.tierDefinitions,
+                  )
                 : current,
         );
     }
 
     function saveDraft(): void {
         if (!draft) return;
-        const cleanDraft = normalizeProgression({
-            ...draft,
-            updatedAt: new Date().toISOString(),
-        }, state.tierDefinitions);
+        const cleanDraft = normalizeProgression(
+            {
+                ...draft,
+                updatedAt: new Date().toISOString(),
+            },
+            state.tierDefinitions,
+        );
         patchState((current) => {
             const exists = current.characters.some(
                 (character) => character.id === cleanDraft.id,
@@ -1480,10 +1622,13 @@ function App() {
             ...current,
             characters: current.characters.map((character) =>
                 character.id === selectedCharacter.id
-                    ? normalizeProgression({
-                          ...updater(character),
-                          updatedAt: new Date().toISOString(),
-                      }, current.tierDefinitions)
+                    ? normalizeProgression(
+                          {
+                              ...updater(character),
+                              updatedAt: new Date().toISOString(),
+                          },
+                          current.tierDefinitions,
+                      )
                     : character,
             ),
         }));
@@ -1499,18 +1644,6 @@ function App() {
             characters: nextCharacters,
             selectedCharacterId: nextCharacters[0]?.id,
         }));
-    }
-
-    async function handleImport(file: File | undefined): Promise<void> {
-        if (!file) return;
-        setImportError("");
-        try {
-            setState(await importState(file));
-        } catch (error) {
-            setImportError(
-                error instanceof Error ? error.message : "Import failed.",
-            );
-        }
     }
 
     return (
@@ -1532,33 +1665,13 @@ function App() {
                     >
                         New Character
                     </button>
-                    <button
-                        type="button"
-                        className="secondary"
-                        onClick={() => exportState(state)}
-                    >
-                        Export
-                    </button>
                 </div>
-                <label className="file-import secondary-button">
-                    Import
-                    <input
-                        type="file"
-                        accept="application/json"
-                        onChange={(event) =>
-                            void handleImport(event.target.files?.[0])
-                        }
-                    />
-                </label>
-                {importError ? (
-                    <p className="error-text">{importError}</p>
-                ) : null}
                 {storageStatus ? (
                     <p className="error-text">{storageStatus}</p>
                 ) : null}
 
                 <section className="player-create">
-                    <label htmlFor="player-name">Add player or table</label>
+                    <label htmlFor="player-name">Add player or group</label>
                     <div className="inline-form">
                         <input
                             id="player-name"
@@ -1591,38 +1704,69 @@ function App() {
                                         No characters yet.
                                     </p>
                                 ) : null}
-                                {characters.map((character) => (
-                                    <button
-                                        key={character.id}
-                                        type="button"
-                                        className={`character-card ${selectedCharacter?.id === character.id ? "selected" : ""}`}
-                                        onClick={() => {
-                                            setState((current) => ({
-                                                ...current,
-                                                selectedCharacterId:
-                                                    character.id,
-                                            }));
-                                            setMode("sheet");
-                                        }}
-                                    >
-                                        <span className="card-title">
-                                            {character.name}
-                                        </span>
-                                        <span>
-                                            {titleCase(character.kind)} · T
-                                            {String(
-                                                character.currentTier,
-                                            ).padStart(2, "0")}
-                                        </span>
-                                        <span className="mini-track">
-                                            <span
-                                                style={{
-                                                    width: `${character.tiers.find((t) => t.status === "current")?.race.exp ?? 0}%`,
-                                                }}
-                                            />
-                                        </span>
-                                    </button>
-                                ))}
+                                {characters.map((character) => {
+                                    const tierData = currentTierData(character);
+                                    const classLevel =
+                                        tierData?.classTrack?.level ?? 1;
+                                    const jobLevel =
+                                        tierData?.jobTrack?.level ?? 1;
+                                    const raceLevel =
+                                        character.kind === "humanoid"
+                                            ? Math.floor(
+                                                  (classLevel + jobLevel) / 2,
+                                              )
+                                            : (tierData?.race.level ?? 1);
+
+                                    return (
+                                        <button
+                                            key={character.id}
+                                            type="button"
+                                            className={`character-card ${selectedCharacter?.id === character.id ? "selected" : ""}`}
+                                            onClick={() => {
+                                                setState((current) => ({
+                                                    ...current,
+                                                    selectedCharacterId:
+                                                        character.id,
+                                                }));
+                                                setMode("sheet");
+                                            }}
+                                        >
+                                            <span className="card-title">
+                                                {character.name}
+                                            </span>
+                                            <span>
+                                                <span
+                                                    className={raceTypeClass(
+                                                        character.kind,
+                                                    )}
+                                                >
+                                                    {raceTypeLabel(
+                                                        character.kind,
+                                                    )}
+                                                </span>{" "}
+                                                ·{" "}
+                                                {tierData?.race.name ??
+                                                    "Unknown Race"}{" "}
+                                                · T
+                                                {String(
+                                                    character.currentTier,
+                                                ).padStart(2, "0")}{" "}
+                                                · L
+                                                {String(raceLevel).padStart(
+                                                    2,
+                                                    "0",
+                                                )}
+                                            </span>
+                                            <span className="mini-track">
+                                                <span
+                                                    style={{
+                                                        width: `${rosterRaceExperience(character)}%`,
+                                                    }}
+                                                />
+                                            </span>
+                                        </button>
+                                    );
+                                })}
                             </div>
                         );
                     })}
@@ -1670,7 +1814,18 @@ function App() {
                             player={selectedPlayer}
                             definitions={state.definitions}
                             tierDefinitions={state.tierDefinitions}
-                            characterTypeDefinitions={state.characterTypeDefinitions}
+                            characterTypeDefinitions={
+                                state.characterTypeDefinitions
+                            }
+                            statCategoryDefinitions={
+                                state.statCategoryDefinitions
+                            }
+                            primaryStatDefinitions={
+                                state.primaryStatDefinitions
+                            }
+                            secondaryStatDefinitions={
+                                state.secondaryStatDefinitions
+                            }
                             rarityDefinitions={state.rarityDefinitions}
                             skillDefinitions={state.skillDefinitions}
                             itemDefinitions={state.itemDefinitions}
@@ -1700,7 +1855,9 @@ function App() {
                             players={state.players}
                             definitions={state.definitions}
                             tierDefinitions={state.tierDefinitions}
-                            characterTypeDefinitions={state.characterTypeDefinitions}
+                            characterTypeDefinitions={
+                                state.characterTypeDefinitions
+                            }
                             rarityDefinitions={state.rarityDefinitions}
                             skillDefinitions={state.skillDefinitions}
                             itemDefinitions={state.itemDefinitions}
@@ -1723,7 +1880,9 @@ function App() {
                             character={selectedCharacter}
                             definitions={state.definitions}
                             tierDefinitions={state.tierDefinitions}
-                            characterTypeDefinitions={state.characterTypeDefinitions}
+                            characterTypeDefinitions={
+                                state.characterTypeDefinitions
+                            }
                             rarityDefinitions={state.rarityDefinitions}
                             onEdit={editSelected}
                         />
@@ -1779,6 +1938,9 @@ interface CharacterSheetProps {
     definitions: AdvancementDefinition[];
     tierDefinitions: TierDefinition[];
     characterTypeDefinitions: CharacterTypeDefinition[];
+    statCategoryDefinitions: StatCategoryDefinition[];
+    primaryStatDefinitions: PrimaryStatDefinition[];
+    secondaryStatDefinitions: SecondaryStatDefinition[];
     rarityDefinitions: RarityDefinition[];
     skillDefinitions: SkillDefinition[];
     itemDefinitions: ItemDefinition[];
@@ -1796,6 +1958,9 @@ function CharacterSheet({
     definitions,
     tierDefinitions,
     characterTypeDefinitions,
+    statCategoryDefinitions,
+    primaryStatDefinitions,
+    secondaryStatDefinitions,
     rarityDefinitions,
     skillDefinitions,
     itemDefinitions,
@@ -1806,9 +1971,23 @@ function CharacterSheet({
     onUpdate,
     onLevelUp,
 }: CharacterSheetProps) {
-    const totals = calculateTotals(character, definitions, tierDefinitions, characterTypeDefinitions, rarityDefinitions);
+    const totals = calculateTotals(
+        character,
+        definitions,
+        tierDefinitions,
+        characterTypeDefinitions,
+        rarityDefinitions,
+    );
     const equippedBonuses = equipmentBonuses(character.items);
     const [itemSearch, setItemSearch] = useState("");
+    const emittedLevelUpKeysRef = useRef<Set<string>>(new Set());
+    const sortedStats = sortedPrimaryStats(
+        statCategoryDefinitions,
+        primaryStatDefinitions,
+    );
+    const sortedStatCategories = [...statCategoryDefinitions].sort(
+        (a, b) => a.order - b.order || a.name.localeCompare(b.name),
+    );
     const itemSkillLimit = character.currentTier;
     const itemSkillsSet = itemSetSkillCount(character.items);
     const itemProvidedSkills = itemSetSkills(character, skillDefinitions);
@@ -1838,10 +2017,16 @@ function CharacterSheet({
         const total = passive + tierRowsTotal;
 
         return (
-            <div className="stat-breakdown-popover calculation-popover" role="tooltip">
+            <div
+                className="stat-breakdown-popover calculation-popover"
+                role="tooltip"
+            >
                 <div className="stat-breakdown-popover-scroll">
                     <table className="stat-breakdown-table">
-                        <caption>{STAT_LABELS[statKey]} calculation</caption>
+                        <caption>
+                            {statLabel(primaryStatDefinitions, statKey)}{" "}
+                            calculation
+                        </caption>
                         <thead>
                             <tr>
                                 <th>Tier</th>
@@ -1876,7 +2061,9 @@ function CharacterSheet({
                             </tr>
                             <tr>
                                 <th scope="row">Calculated total</th>
-                                <td colSpan={5}>{displayNumber(tierRowsTotal)} tier-derived</td>
+                                <td colSpan={5}>
+                                    {displayNumber(tierRowsTotal)} tier-derived
+                                </td>
                                 <td>{displayNumber(total)}</td>
                             </tr>
                         </tfoot>
@@ -1886,41 +2073,67 @@ function CharacterSheet({
         );
     }
 
-    function renderVitalBreakdown(kind: "hp" | "mp"): JSX.Element {
-        const isHp = kind === "hp";
-        const primaryKey: StatKey = isHp ? "fortitude" : "mana";
-        const secondaryKey: StatKey = isHp ? "strength" : "intelligence";
-        const primary = totals[primaryKey];
-        const secondary = totals[secondaryKey];
+    function renderSecondaryBreakdown(
+        definition: SecondaryStatDefinition,
+    ): JSX.Element {
+        const primary = totals[definition.multipliedStat];
+        const secondary = totals[definition.addedStat];
         const scaled = primary * character.currentTier;
         const total = scaled + secondary;
 
         return (
-            <div className="stat-breakdown-popover vital-breakdown-popover calculation-popover" role="tooltip">
+            <div
+                className="stat-breakdown-popover vital-breakdown-popover calculation-popover"
+                role="tooltip"
+            >
                 <div className="stat-breakdown-popover-scroll">
                     <table className="stat-breakdown-table vital-breakdown-table">
-                        <caption>{isHp ? "HP" : "MP"} calculation</caption>
+                        <caption>
+                            {definition.longName} ({definition.shortName})
+                        </caption>
                         <tbody>
                             <tr>
-                                <th scope="row">{STAT_LABELS[primaryKey]}</th>
+                                <th scope="row">Description</th>
+                                <td>
+                                    {definition.description ||
+                                        "No description."}
+                                </td>
+                            </tr>
+                            <tr>
+                                <th scope="row">
+                                    {statLabel(
+                                        primaryStatDefinitions,
+                                        definition.multipliedStat,
+                                    )}
+                                </th>
                                 <td>{displayNumber(primary)}</td>
                             </tr>
                             <tr>
                                 <th scope="row">Current tier multiplier</th>
-                                <td>× {displayNumber(character.currentTier)}</td>
+                                <td>
+                                    × {displayNumber(character.currentTier)}
+                                </td>
                             </tr>
                             <tr>
                                 <th scope="row">Tier-scaled subtotal</th>
                                 <td>{displayNumber(scaled)}</td>
                             </tr>
                             <tr>
-                                <th scope="row">+ {STAT_LABELS[secondaryKey]}</th>
+                                <th scope="row">
+                                    +{" "}
+                                    {statLabel(
+                                        primaryStatDefinitions,
+                                        definition.addedStat,
+                                    )}
+                                </th>
                                 <td>{displayNumber(secondary)}</td>
                             </tr>
                         </tbody>
                         <tfoot>
                             <tr>
-                                <th scope="row">Total {isHp ? "HP" : "MP"}</th>
+                                <th scope="row">
+                                    Total {definition.shortName}
+                                </th>
                                 <td>{displayNumber(total)}</td>
                             </tr>
                         </tfoot>
@@ -1932,6 +2145,17 @@ function CharacterSheet({
 
     function getCurrentTierData(): TierProgression | undefined {
         return character.tiers.find((t) => t.status === "current");
+    }
+
+    function emitLevelUpNotice(notice: LevelUpNotice): void {
+        const key = `${character.id}:${notice.trackName}:${notice.level}`;
+        if (emittedLevelUpKeysRef.current.has(key)) return;
+        emittedLevelUpKeysRef.current.add(key);
+        window.setTimeout(
+            () => emittedLevelUpKeysRef.current.delete(key),
+            1000,
+        );
+        onLevelUp(notice);
     }
 
     function updateTrack(
@@ -1980,7 +2204,9 @@ function CharacterSheet({
                 currentTierData.classTrack &&
                 currentTierData.jobTrack
             ) {
-                const updatedTier = finalTiers.find((t) => t.status === "current")!;
+                const updatedTier = finalTiers.find(
+                    (t) => t.status === "current",
+                )!;
                 const classL = (updatedTier.classTrack as any)?.level ?? 1;
                 const jobL = (updatedTier.jobTrack as any)?.level ?? 1;
                 derivedRaceLevel = Math.floor((classL + jobL) / 2);
@@ -2018,7 +2244,7 @@ function CharacterSheet({
                 characterTypeDefinitions,
                 rarityDefinitions,
             );
-            onLevelUp({
+            emitLevelUpNotice({
                 characterName: current.name,
                 trackName:
                     (currentTierDataAfter[track] as any).name || "Unknown",
@@ -2032,7 +2258,7 @@ function CharacterSheet({
                     currentTierDataAfter.race as LevelTrack,
                     "race",
                 );
-                onLevelUp({
+                emitLevelUpNotice({
                     characterName: current.name,
                     trackName: currentTierDataAfter.race.name || "Race",
                     level: derivedRaceLevel,
@@ -2132,7 +2358,12 @@ function CharacterSheet({
                 <div className="header-actions">
                     <span className="tier-badge">
                         Tier {String(character.currentTier).padStart(2, "0")} ·{" "}
-                        {tierDefinition(tierDefinitions, character.currentTier).title}
+                        {
+                            tierDefinition(
+                                tierDefinitions,
+                                character.currentTier,
+                            ).title
+                        }
                     </span>
                     <button type="button" onClick={onEdit}>
                         Edit
@@ -2145,22 +2376,33 @@ function CharacterSheet({
 
             <section className="vitals glass-panel">
                 <h3>Secondary Stats</h3>
-                <div className="vital-row vital-row--breakdown" tabIndex={0}>
-                    <span>HP</span>
-                    <strong>{displayNumber(hp(character, totals))}</strong>
-                    {renderVitalBreakdown("hp")}
-                </div>
-                <div className="vital-row vital-row--breakdown" tabIndex={0}>
-                    <span>MP</span>
-                    <strong>{displayNumber(mp(character, totals))}</strong>
-                    {renderVitalBreakdown("mp")}
-                </div>
-                <div className="vital-row">
-                    <span>Item Skills Set</span>
-                    <strong>
-                        {itemSkillsSet}/{itemSkillLimit}
-                    </strong>
-                </div>
+                {[...secondaryStatDefinitions]
+                    .sort(
+                        (a, b) =>
+                            a.order - b.order ||
+                            a.shortName.localeCompare(b.shortName),
+                    )
+                    .map((definition) => (
+                        <div
+                            key={definition.id}
+                            className="vital-row vital-row--breakdown"
+                            tabIndex={0}
+                        >
+                            <span title={definition.longName}>
+                                {definition.shortName}
+                            </span>
+                            <strong>
+                                {displayNumber(
+                                    secondaryStatValue(
+                                        definition,
+                                        character,
+                                        totals,
+                                    ),
+                                )}
+                            </strong>
+                            {renderSecondaryBreakdown(definition)}
+                        </div>
+                    ))}
                 <div className="affinity-list">
                     {character.affinities.length ? (
                         character.affinities.map((affName) => {
@@ -2244,7 +2486,10 @@ function CharacterSheet({
                             ...currentTierData.classTrack,
                             level: currentTierData.classTrack.level ?? 1,
                             exp: (currentTierData.classTrack as any).exp ?? 0,
-                            maxLevel: maxLevelForTier(tierDefinitions, character.currentTier),
+                            maxLevel: maxLevelForTier(
+                                tierDefinitions,
+                                character.currentTier,
+                            ),
                             perLevelBonus: {},
                         }}
                         onStep={(direction) =>
@@ -2259,7 +2504,10 @@ function CharacterSheet({
                             ...currentTierData.jobTrack,
                             level: currentTierData.jobTrack.level ?? 1,
                             exp: (currentTierData.jobTrack as any).exp ?? 0,
-                            maxLevel: maxLevelForTier(tierDefinitions, character.currentTier),
+                            maxLevel: maxLevelForTier(
+                                tierDefinitions,
+                                character.currentTier,
+                            ),
                             perLevelBonus: {},
                         }}
                         onStep={(direction) =>
@@ -2272,27 +2520,59 @@ function CharacterSheet({
             <section className="stats-panel glass-panel">
                 <h3>Stats</h3>
                 <div className="stat-groups">
-                    {STAT_GROUPS.map((group) => (
-                        <div key={group.label} className="stat-group">
-                            <h4>{group.label}</h4>
-                            {group.keys.map((key) => (
-                                <div
-                                    key={key}
-                                    className="stat-row stat-row--breakdown"
-                                    tabIndex={0}
-                                >
-                                    <span>{STAT_LABELS[key]}</span>
-                                    <strong>
-                                        {displayNumber(totals[key])}{" "}
-                                        <em>
-                                            (+eq {displayNumber(partialStatTotal(equippedBonuses, key))})
-                                        </em>
-                                    </strong>
-                                    {renderStatBreakdown(key)}
-                                </div>
-                            ))}
-                        </div>
-                    ))}
+                    {sortedStatCategories.map((category) => {
+                        const categoryStats = sortedStats
+                            .filter((stat) => stat.categoryId === category.id)
+                            .sort(
+                                (a, b) =>
+                                    (a.role === b.role
+                                        ? 0
+                                        : a.role === "aggressive"
+                                          ? -1
+                                          : 1) ||
+                                    a.order - b.order ||
+                                    a.label.localeCompare(b.label),
+                            );
+                        if (!categoryStats.length) return null;
+
+                        return (
+                            <div key={category.id} className="stat-group">
+                                <h4>{category.name}</h4>
+                                {categoryStats.map((stat) => (
+                                    <div
+                                        key={stat.key}
+                                        className="stat-row stat-row--breakdown"
+                                        tabIndex={0}
+                                    >
+                                        <span>
+                                            {stat.label}{" "}
+                                            <span
+                                                className={`stat-role-marker stat-role-${stat.role}`}
+                                            >
+                                                {stat.role === "aggressive"
+                                                    ? "A"
+                                                    : "D"}
+                                            </span>
+                                        </span>
+                                        <strong>
+                                            {displayNumber(totals[stat.key])}{" "}
+                                            <em>
+                                                (+eq{" "}
+                                                {displayNumber(
+                                                    partialStatTotal(
+                                                        equippedBonuses,
+                                                        stat.key,
+                                                    ),
+                                                )}
+                                                )
+                                            </em>
+                                        </strong>
+                                        {renderStatBreakdown(stat.key)}
+                                    </div>
+                                ))}
+                            </div>
+                        );
+                    })}
                 </div>
             </section>
 
@@ -2333,7 +2613,9 @@ function CharacterSheet({
                             type="search"
                             value={itemSearch}
                             placeholder="Search item compendium..."
-                            onChange={(event) => setItemSearch(event.target.value)}
+                            onChange={(event) =>
+                                setItemSearch(event.target.value)
+                            }
                         />
                     </label>
                     {itemSearch.trim() ? (
@@ -2344,20 +2626,26 @@ function CharacterSheet({
                                         key={item.id}
                                         type="button"
                                         className="secondary"
-                                        onClick={() => addItemFromDefinitionToSheet(item)}
+                                        onClick={() =>
+                                            addItemFromDefinitionToSheet(item)
+                                        }
                                     >
-                                        + {item.name} · T{item.tier} · {item.rarity}
+                                        + {item.name} · T{item.tier} ·{" "}
+                                        {item.rarity}
                                     </button>
                                 ))
                             ) : (
-                                <span className="muted small">No matching items.</span>
+                                <span className="muted small">
+                                    No matching items.
+                                </span>
                             )}
                         </div>
                     ) : null}
                 </div>
                 <p className="muted small">
                     Stat bonus limits: 3 armor, 3 accessories, 2 weapons. Item
-                    skill slots equal current tier.
+                    skill slots equal current tier. Item Skills Set:{" "}
+                    {itemSkillsSet}/{itemSkillLimit}.
                 </p>
                 <div className="item-grid">
                     {character.items.length ? (
@@ -2455,7 +2743,10 @@ function CharacterSheet({
                                 (d) => d.id === charCurrency.currencyId,
                             );
                             return (
-                                <article key={charCurrency.id} className="item-card">
+                                <article
+                                    key={charCurrency.id}
+                                    className="item-card"
+                                >
                                     <div className="item-card-header">
                                         <strong>
                                             {def?.name ?? "Unknown Currency"}
@@ -2465,26 +2756,33 @@ function CharacterSheet({
                                         </span>
                                     </div>
                                     <div className="stepper-control">
-                                        <span className="stepper-label">Quantity</span>
+                                        <span className="stepper-label">
+                                            Quantity
+                                        </span>
                                         <span className="stepper-row">
                                             <button
                                                 type="button"
                                                 className="stepper-btn"
-                                                disabled={charCurrency.quantity <= 0}
+                                                disabled={
+                                                    charCurrency.quantity <= 0
+                                                }
                                                 onClick={() => {
                                                     onUpdate((current) => ({
                                                         ...current,
                                                         currencies:
                                                             current.currencies.map(
                                                                 (c) =>
-                                                                    c.id === charCurrency.id
+                                                                    c.id ===
+                                                                    charCurrency.id
                                                                         ? {
-                                                                            ...c,
-                                                                            quantity: Math.max(
-                                                                                0,
-                                                                                c.quantity - 1,
-                                                                            ),
-                                                                        }
+                                                                              ...c,
+                                                                              quantity:
+                                                                                  Math.max(
+                                                                                      0,
+                                                                                      c.quantity -
+                                                                                          1,
+                                                                                  ),
+                                                                          }
                                                                         : c,
                                                             ),
                                                     }));
@@ -2499,19 +2797,24 @@ function CharacterSheet({
                                             <button
                                                 type="button"
                                                 className="stepper-btn"
-                                                disabled={charCurrency.quantity >= 99999998}
+                                                disabled={
+                                                    charCurrency.quantity >=
+                                                    99999998
+                                                }
                                                 onClick={() => {
                                                     onUpdate((current) => ({
                                                         ...current,
                                                         currencies:
                                                             current.currencies.map(
                                                                 (c) =>
-                                                                    c.id === charCurrency.id
+                                                                    c.id ===
+                                                                    charCurrency.id
                                                                         ? {
-                                                                            ...c,
-                                                                            quantity:
-                                                                                c.quantity + 1,
-                                                                        }
+                                                                              ...c,
+                                                                              quantity:
+                                                                                  c.quantity +
+                                                                                  1,
+                                                                          }
                                                                         : c,
                                                             ),
                                                     }));
@@ -2534,10 +2837,12 @@ function CharacterSheet({
                                             onClick={() => {
                                                 onUpdate((current) => ({
                                                     ...current,
-                                                    currencies: current.currencies.filter(
-                                                        (c) =>
-                                                            c.id !== charCurrency.id,
-                                                    ),
+                                                    currencies:
+                                                        current.currencies.filter(
+                                                            (c) =>
+                                                                c.id !==
+                                                                charCurrency.id,
+                                                        ),
                                                 }));
                                             }}
                                         >
@@ -2553,7 +2858,10 @@ function CharacterSheet({
                 </div>
                 {currencyDefinitions.length ? (
                     <div className="toolbar compact">
-                        <label className="small muted" style={{ marginRight: "8px" }}>
+                        <label
+                            className="small muted"
+                            style={{ marginRight: "8px" }}
+                        >
                             Add from compendium:
                         </label>
                         <select
@@ -2641,41 +2949,44 @@ function SkillList({
                     const isItemProvided = skill.id.startsWith("item-skill-");
 
                     return (
-                    <article key={skill.id} className="skill-card">
-                        <div className="skill-card-header">
-                            <strong>{skill.name}</strong>
-                            <span className={rarityClass(skill.rarity)}>
-                                {skill.rarity}
-                            </span>
-                        </div>
-                        <p>{skill.description || "No description yet."}</p>
-                        <p className="small muted">
-                            {skill.source} · MP {skill.mpCost || "N/A"} ·
-                            Cooldown {skill.cooldown || "N/A"}
-                        </p>
-                        {isItemProvided ? (
-                            <p className="small muted">Provided by a set item skill.</p>
-                        ) : (
-                            <ProgressionControls
-                                levelLabel={`Level ${skill.level ?? 1}`}
-                                exp={skill.exp}
-                                onDecrease={() =>
-                                    onChange(skill.id, (current) =>
-                                        stepSkillExperience(current, -1),
-                                    )
-                                }
-                                onIncrease={() =>
-                                    onChange(skill.id, (current) =>
-                                        stepSkillExperience(current, 1),
-                                    )
-                                }
-                                decreaseDisabled={
-                                    (skill.level ?? 1) <= 1 && skill.exp <= 0
-                                }
-                            />
-                        )}
-                    </article>
-                );
+                        <article key={skill.id} className="skill-card">
+                            <div className="skill-card-header">
+                                <strong>{skill.name}</strong>
+                                <span className={rarityClass(skill.rarity)}>
+                                    {skill.rarity}
+                                </span>
+                            </div>
+                            <p>{skill.description || "No description yet."}</p>
+                            <p className="small muted">
+                                {skill.source} · MP {skill.mpCost || "N/A"} ·
+                                Cooldown {skill.cooldown || "N/A"}
+                            </p>
+                            {isItemProvided ? (
+                                <p className="small muted">
+                                    Provided by a set item skill.
+                                </p>
+                            ) : (
+                                <ProgressionControls
+                                    levelLabel={`Level ${skill.level ?? 1}`}
+                                    exp={skill.exp}
+                                    onDecrease={() =>
+                                        onChange(skill.id, (current) =>
+                                            stepSkillExperience(current, -1),
+                                        )
+                                    }
+                                    onIncrease={() =>
+                                        onChange(skill.id, (current) =>
+                                            stepSkillExperience(current, 1),
+                                        )
+                                    }
+                                    decreaseDisabled={
+                                        (skill.level ?? 1) <= 1 &&
+                                        skill.exp <= 0
+                                    }
+                                />
+                            )}
+                        </article>
+                    );
                 })
             ) : (
                 <p className="muted small">
@@ -2791,14 +3102,20 @@ function CreatorWizard({
 
     function setKind(kind: CharacterKind): void {
         onDraft((current) => {
-            const normalized = normalizeProgression({ ...current, kind }, tierDefinitions);
+            const normalized = normalizeProgression(
+                { ...current, kind },
+                tierDefinitions,
+            );
             return normalized;
         });
     }
 
     function setHalfFocus(focus: HalfMonsterFocus): void {
         onDraft((current) =>
-            normalizeProgression({ ...current, halfMonsterFocus: focus }, tierDefinitions),
+            normalizeProgression(
+                { ...current, halfMonsterFocus: focus },
+                tierDefinitions,
+            ),
         );
     }
 
@@ -2850,7 +3167,9 @@ function CreatorWizard({
                                 ? {
                                       name: "Page",
                                       rarity: "Common",
-                                      level: isCurrent ? 1 : maxLevelForTier(tierDefinitions, t),
+                                      level: isCurrent
+                                          ? 1
+                                          : maxLevelForTier(tierDefinitions, t),
                                   }
                                 : undefined,
                         jobTrack:
@@ -2860,7 +3179,9 @@ function CreatorWizard({
                                 ? {
                                       name: "Apprentice Apothecary",
                                       rarity: "Common",
-                                      level: isCurrent ? 1 : maxLevelForTier(tierDefinitions, t),
+                                      level: isCurrent
+                                          ? 1
+                                          : maxLevelForTier(tierDefinitions, t),
                                   }
                                 : undefined,
                     });
@@ -2908,13 +3229,19 @@ function CreatorWizard({
                             classTrack: prevTier.classTrack
                                 ? {
                                       ...prevTier.classTrack,
-                                      level: maxLevelForTier(tierDefinitions, t),
+                                      level: maxLevelForTier(
+                                          tierDefinitions,
+                                          t,
+                                      ),
                                   }
                                 : undefined,
                             jobTrack: prevTier.jobTrack
                                 ? {
                                       ...prevTier.jobTrack,
-                                      level: maxLevelForTier(tierDefinitions, t),
+                                      level: maxLevelForTier(
+                                          tierDefinitions,
+                                          t,
+                                      ),
                                   }
                                 : undefined,
                         });
@@ -2962,7 +3289,9 @@ function CreatorWizard({
                     ...t,
                     race: {
                         ...definition,
-                        level: isCompleted ? maxLevelForTier(tierDefinitions, t.tier) : 1,
+                        level: isCompleted
+                            ? maxLevelForTier(tierDefinitions, t.tier)
+                            : 1,
                         exp: isCompleted ? 100 : 0,
                     },
                 };
@@ -3036,7 +3365,10 @@ function CreatorWizard({
                 if (trackKey === "race") {
                     // Humanoid race level is auto-calculated, so +/- does nothing.
                     if (current.kind === "humanoid") return t;
-                    const maxLevel = maxLevelForTier(tierDefinitions, targetTier);
+                    const maxLevel = maxLevelForTier(
+                        tierDefinitions,
+                        targetTier,
+                    );
                     const level = Math.max(
                         1,
                         Math.min(maxLevel, t.race.level + delta),
@@ -3046,7 +3378,10 @@ function CreatorWizard({
 
                 if (trackKey === "classTrack") {
                     if (!t.classTrack) return t;
-                    const maxLevel = maxLevelForTier(tierDefinitions, targetTier);
+                    const maxLevel = maxLevelForTier(
+                        tierDefinitions,
+                        targetTier,
+                    );
                     const newClassLevel = Math.max(
                         1,
                         Math.min(maxLevel, (t.classTrack.level ?? 1) + delta),
@@ -3058,9 +3393,16 @@ function CreatorWizard({
                         const jobLevel = t.jobTrack?.level ?? 1;
                         const raceLevel = Math.min(
                             maxLevel,
-                            Math.max(1, Math.floor((newClassLevel + jobLevel) / 2)),
+                            Math.max(
+                                1,
+                                Math.floor((newClassLevel + jobLevel) / 2),
+                            ),
                         );
-                        return { ...t, classTrack, race: { ...t.race, level: raceLevel } };
+                        return {
+                            ...t,
+                            classTrack,
+                            race: { ...t.race, level: raceLevel },
+                        };
                     }
 
                     return { ...t, classTrack };
@@ -3081,7 +3423,11 @@ function CreatorWizard({
                         maxLevel,
                         Math.max(1, Math.floor((classLevel + newJobLevel) / 2)),
                     );
-                    return { ...t, jobTrack, race: { ...t.race, level: raceLevel } };
+                    return {
+                        ...t,
+                        jobTrack,
+                        race: { ...t.race, level: raceLevel },
+                    };
                 }
 
                 return { ...t, jobTrack };
@@ -3207,11 +3553,11 @@ function CreatorWizard({
     function renderTrackStatSummary(
         track:
             | {
-                   level?: number;
-                   definitionId?: string;
+                  level?: number;
+                  definitionId?: string;
                   name?: string;
                   statWeights?: Partial<StatBlock>;
-               }
+              }
             | null
             | undefined,
         kind: DefinitionKind,
@@ -3314,19 +3660,6 @@ function CreatorWizard({
                         />
                     </label>
                     <label>
-                        Age
-                        <input
-                            value={draft.age}
-                            onChange={(event) =>
-                                onDraft((current) => ({
-                                    ...current,
-                                    age: event.target.value,
-                                }))
-                            }
-                            placeholder="0 (20)"
-                        />
-                    </label>
-                    <label>
                         Player / Table
                         <select
                             value={draft.playerId}
@@ -3403,7 +3736,7 @@ function CreatorWizard({
                         <p>{currentTierRule.details}</p>
                     </div>
                     <fieldset className="full-width affinity-picker-fieldset">
-                        <legend>Affinities (from Compendium)</legend>
+                        <legend>Affinities</legend>
                         <div className="affinity-picker">
                             {affinityDefinitions.map((aff) => {
                                 const active = draft.affinities.includes(
@@ -3446,6 +3779,95 @@ function CreatorWizard({
                             })}
                         </div>
                     </fieldset>
+                    <label>
+                        Age
+                        <input
+                            value={draft.age}
+                            onChange={(event) =>
+                                onDraft((current) => ({
+                                    ...current,
+                                    age: event.target.value,
+                                }))
+                            }
+                            placeholder="0 (20)"
+                        />
+                    </label>
+                    <label>
+                        Size
+                        <input
+                            value={draft.size}
+                            onChange={(event) =>
+                                onDraft((current) => ({
+                                    ...current,
+                                    size: event.target.value,
+                                }))
+                            }
+                            placeholder="Small, Medium, Large..."
+                        />
+                    </label>
+                    <label>
+                        Build
+                        <input
+                            value={draft.build}
+                            onChange={(event) =>
+                                onDraft((current) => ({
+                                    ...current,
+                                    build: event.target.value,
+                                }))
+                            }
+                            placeholder="Lean, sturdy, athletic..."
+                        />
+                    </label>
+                    <label>
+                        Pronouns
+                        <input
+                            value={draft.pronouns}
+                            onChange={(event) =>
+                                onDraft((current) => ({
+                                    ...current,
+                                    pronouns: event.target.value,
+                                }))
+                            }
+                            placeholder="they/them, she/her, he/him..."
+                        />
+                    </label>
+                    <label>
+                        Gender
+                        <input
+                            value={draft.gender}
+                            onChange={(event) =>
+                                onDraft((current) => ({
+                                    ...current,
+                                    gender: event.target.value,
+                                }))
+                            }
+                        />
+                    </label>
+                    <label>
+                        Sexual Preference
+                        <input
+                            value={draft.sexualPreference}
+                            onChange={(event) =>
+                                onDraft((current) => ({
+                                    ...current,
+                                    sexualPreference: event.target.value,
+                                }))
+                            }
+                        />
+                    </label>
+                    <label className="full-width">
+                        Appearance
+                        <textarea
+                            value={draft.appearance}
+                            onChange={(event) =>
+                                onDraft((current) => ({
+                                    ...current,
+                                    appearance: event.target.value,
+                                }))
+                            }
+                            placeholder="Physical appearance, clothing, markings, aura..."
+                        />
+                    </label>
                     <label className="full-width">
                         Notes
                         <textarea
@@ -3464,15 +3886,6 @@ function CreatorWizard({
 
             {currentStep === "progression" ? (
                 <div className="form-grid two-col">
-                    <div className="full-width">
-                        <h3>Tier Progression</h3>
-                        <p className="muted">
-                            Drag a race, class, or job from the source panel and
-                            drop it onto any tier slot. Only the current tier
-                            tracks level progression.
-                        </p>
-                    </div>
-
                     {/* Left column — compact tier slots */}
                     <div className="tier-slots-panel">
                         {draft.tiers.map((tierData) => (
@@ -3487,7 +3900,14 @@ function CreatorWizard({
                                         : "(Maxed)"}
                                 </legend>
                                 <p className="muted small">
-                                    Static tier bonus: +{displayNumber(tierDefinition(tierDefinitions, tierData.tier).staticBonus)} to all stats
+                                    Static tier bonus: +
+                                    {displayNumber(
+                                        tierDefinition(
+                                            tierDefinitions,
+                                            tierData.tier,
+                                        ).staticBonus,
+                                    )}{" "}
+                                    to all stats
                                 </p>
 
                                 {/* Race slot */}
@@ -3526,31 +3946,44 @@ function CreatorWizard({
                                     </div>
                                     {(() => {
                                         // For humanoids, race level is auto-calculated from class+job average.
-                                        const isHumanoid = draft.kind === "humanoid";
+                                        const isHumanoid =
+                                            draft.kind === "humanoid";
                                         let displayRaceLevel: number;
 
                                         if (isHumanoid) {
-                                            const classLv = tierData.classTrack?.level ?? 1;
-                                            const jobLv = tierData.jobTrack?.level ?? 1;
+                                            const classLv =
+                                                tierData.classTrack?.level ?? 1;
+                                            const jobLv =
+                                                tierData.jobTrack?.level ?? 1;
                                             displayRaceLevel = Math.min(
-                                                maxLevelForTier(tierDefinitions, tierData.tier),
+                                                maxLevelForTier(
+                                                    tierDefinitions,
+                                                    tierData.tier,
+                                                ),
                                                 Math.max(
                                                     1,
-                                                    Math.floor((classLv + jobLv) / 2),
+                                                    Math.floor(
+                                                        (classLv + jobLv) / 2,
+                                                    ),
                                                 ),
                                             );
                                         } else {
-                                            displayRaceLevel = tierData.race.level;
+                                            displayRaceLevel =
+                                                tierData.race.level;
                                         }
 
                                         // Use auto-calculated level for stat summary so it tracks class/job changes.
                                         const raceTrackForStats = isHumanoid
-                                            ? { ...tierData.race, level: displayRaceLevel }
+                                            ? {
+                                                  ...tierData.race,
+                                                  level: displayRaceLevel,
+                                              }
                                             : tierData.race;
 
                                         return (
                                             <>
-                                                {tierData.status === "current" ? (
+                                                {tierData.status ===
+                                                "current" ? (
                                                     <div className="level-buttons">
                                                         {!isHumanoid ? (
                                                             <button
@@ -3564,15 +3997,22 @@ function CreatorWizard({
                                                                     )
                                                                 }
                                                                 disabled={
-                                                                    tierData.race.level <= 1
+                                                                    tierData
+                                                                        .race
+                                                                        .level <=
+                                                                    1
                                                                 }
                                                             >
                                                                 −
                                                             </button>
                                                         ) : null}
                                                         <span className="level-value">
-                                                            Lv {displayRaceLevel}/
-                                                            {maxLevelForTier(tierDefinitions, tierData.tier)}
+                                                            Lv{" "}
+                                                            {displayRaceLevel}/
+                                                            {maxLevelForTier(
+                                                                tierDefinitions,
+                                                                tierData.tier,
+                                                            )}
                                                         </span>
                                                         {!isHumanoid ? (
                                                             <button
@@ -3586,7 +4026,9 @@ function CreatorWizard({
                                                                     )
                                                                 }
                                                                 disabled={
-                                                                    tierData.race.level >=
+                                                                    tierData
+                                                                        .race
+                                                                        .level >=
                                                                     maxLevelForTier(
                                                                         tierDefinitions,
                                                                         tierData.tier,
@@ -3908,13 +4350,10 @@ function CreatorWizard({
             {currentStep === "skills" ? (
                 <div className="creator-detail-grid">
                     <section>
-                        <div className="section-title-row">
-                            <h3>Skills (drag from compendium)</h3>
-                        </div>
                         <div className="skill-source-list creator-skills-panel">
                             <p className="eyebrow">
-                                Available Skills from Compendium (Tier{" "}
-                                {draft.currentTier} and below)
+                                Available Skills (Tier {draft.currentTier} and
+                                below)
                             </p>
                             <input
                                 className="skill-filter-input"
@@ -3978,13 +4417,10 @@ function CreatorWizard({
             {currentStep === "items" ? (
                 <div className="creator-detail-grid">
                     <section>
-                        <div className="section-title-row">
-                            <h3>Items (drag from compendium)</h3>
-                        </div>
                         <div className="item-source-list creator-items-panel">
                             <p className="eyebrow">
-                                Available Items from Compendium (Tier{" "}
-                                {draft.currentTier} and below)
+                                Available Items (Tier {draft.currentTier} and
+                                below)
                             </p>
                             <input
                                 className="skill-filter-input"
@@ -4051,7 +4487,9 @@ function CreatorWizard({
                                 key={item.id}
                                 item={item}
                                 tier={draft.currentTier}
-                                itemSkillSetCount={itemSetSkillCount(draft.items)}
+                                itemSkillSetCount={itemSetSkillCount(
+                                    draft.items,
+                                )}
                                 itemSkillLimit={draft.currentTier}
                                 onChange={(updater) =>
                                     updateItem(item.id, updater)
@@ -4332,7 +4770,8 @@ function ItemEditor({
                             className="eyebrow"
                             style={{ marginBottom: "0.4rem" }}
                         >
-                            Available Skills ({itemSkillSetCount}/{itemSkillLimit} set)
+                            Available Skills ({itemSkillSetCount}/
+                            {itemSkillLimit} set)
                         </p>
                         {(item.skillNames?.length ?? 0) > 0 ? (
                             <div className="skill-toggle-list">
@@ -4365,7 +4804,10 @@ function ItemEditor({
                                                         currentSet.includes(
                                                             skillName,
                                                         );
-                                                    if (!isSet && itemSkillSlotsFull) {
+                                                    if (
+                                                        !isSet &&
+                                                        itemSkillSlotsFull
+                                                    ) {
                                                         return current;
                                                     }
                                                     return {
@@ -4440,6 +4882,12 @@ function CatalogManager({
             setSelectedId(state.tierDefinitions[0]?.id ?? null);
         else if (tab === "character-type")
             setSelectedId(state.characterTypeDefinitions[0]?.id ?? null);
+        else if (tab === "stat-category")
+            setSelectedId(state.statCategoryDefinitions[0]?.id ?? null);
+        else if (tab === "primary-stat")
+            setSelectedId(state.primaryStatDefinitions[0]?.id ?? null);
+        else if (tab === "secondary-stat")
+            setSelectedId(state.secondaryStatDefinitions[0]?.id ?? null);
         else if (tab === "rarity")
             setSelectedId(state.rarityDefinitions[0]?.id ?? null);
         else if (tab === "currency")
@@ -4467,6 +4915,30 @@ function CatalogManager({
         } else if (activeTab === "tier") {
             const entry = createTierDefinition(state.tierDefinitions);
             onChange({ tierDefinitions: [...state.tierDefinitions, entry] });
+            setSelectedId(entry.id);
+        } else if (activeTab === "stat-category") {
+            const entry = createStatCategoryDefinition(
+                state.statCategoryDefinitions,
+            );
+            onChange({
+                statCategoryDefinitions: [
+                    ...state.statCategoryDefinitions,
+                    entry,
+                ],
+            });
+            setSelectedId(entry.id);
+        } else if (activeTab === "primary-stat") {
+            setSelectedId(state.primaryStatDefinitions[0]?.id ?? null);
+        } else if (activeTab === "secondary-stat") {
+            const entry = createSecondaryStatDefinition(
+                state.secondaryStatDefinitions,
+            );
+            onChange({
+                secondaryStatDefinitions: [
+                    ...state.secondaryStatDefinitions,
+                    entry,
+                ],
+            });
             setSelectedId(entry.id);
         } else if (activeTab === "rarity") {
             const entry = createRarityDefinition();
@@ -4499,13 +4971,16 @@ function CatalogManager({
         { key: "race", label: "Races" },
         { key: "class", label: "Classes" },
         { key: "job", label: "Jobs" },
-        { key: "tier", label: "Tiers" },
-        { key: "character-type", label: "Types" },
-        { key: "rarity", label: "Rarities" },
-        { key: "affinity", label: "Affinities" },
-        { key: "currency", label: "Currencies" },
         { key: "skill", label: "Skills" },
         { key: "item", label: "Items" },
+        { key: "affinity", label: "Affinities" },
+        { key: "currency", label: "Currencies" },
+        { key: "rarity", label: "Rarities" },
+        { key: "tier", label: "Tiers" },
+        { key: "character-type", label: "Types" },
+        { key: "stat-category", label: "Stat Categories" },
+        { key: "primary-stat", label: "Primary Stats" },
+        { key: "secondary-stat", label: "Secondary Stats" },
     ];
 
     function getNewButtonText(): string {
@@ -4513,6 +4988,9 @@ function CatalogManager({
         if (!tab) return "Entry";
         if (activeTab === "tier") return "Tier";
         if (activeTab === "character-type") return "Character Type";
+        if (activeTab === "stat-category") return "Stat Category";
+        if (activeTab === "primary-stat") return "Primary Stat";
+        if (activeTab === "secondary-stat") return "Secondary Stat";
         if (activeTab === "affinity") return "Affinity";
         if (activeTab === "rarity") return "Rarity";
         if (activeTab === "class") return "Class";
@@ -4528,7 +5006,10 @@ function CatalogManager({
                 <button
                     type="button"
                     onClick={addCurrent}
-                    disabled={activeTab === "character-type"}
+                    disabled={
+                        activeTab === "character-type" ||
+                        activeTab === "primary-stat"
+                    }
                 >
                     New {getNewButtonText()}
                 </button>
@@ -4586,6 +5067,38 @@ function CatalogManager({
                     }
                 />
             ) : null}
+            {activeTab === "stat-category" ? (
+                <StatCategoryCompendium
+                    categories={state.statCategoryDefinitions}
+                    selectedId={selectedId}
+                    onSelected={setSelectedId}
+                    onChange={(statCategoryDefinitions) =>
+                        onChange({ statCategoryDefinitions })
+                    }
+                />
+            ) : null}
+            {activeTab === "primary-stat" ? (
+                <PrimaryStatCompendium
+                    stats={state.primaryStatDefinitions}
+                    categories={state.statCategoryDefinitions}
+                    selectedId={selectedId}
+                    onSelected={setSelectedId}
+                    onChange={(primaryStatDefinitions) =>
+                        onChange({ primaryStatDefinitions })
+                    }
+                />
+            ) : null}
+            {activeTab === "secondary-stat" ? (
+                <SecondaryStatCompendium
+                    stats={state.secondaryStatDefinitions}
+                    primaryStats={state.primaryStatDefinitions}
+                    selectedId={selectedId}
+                    onSelected={setSelectedId}
+                    onChange={(secondaryStatDefinitions) =>
+                        onChange({ secondaryStatDefinitions })
+                    }
+                />
+            ) : null}
             {activeTab === "currency" ? (
                 <CurrencyCompendium
                     currencies={state.currencyDefinitions}
@@ -4615,6 +5128,7 @@ function CatalogManager({
                     tierDefinitions={state.tierDefinitions}
                     rarityDefinitions={state.rarityDefinitions}
                     skills={state.skillDefinitions}
+                    primaryStatDefinitions={state.primaryStatDefinitions}
                     affinityDefinitions={state.affinityDefinitions}
                     selectedId={selectedId}
                     onSelected={setSelectedId}
@@ -4630,6 +5144,7 @@ function CatalogManager({
                     kind={activeTab}
                     definitions={state.definitions}
                     tierDefinitions={state.tierDefinitions}
+                    primaryStatDefinitions={state.primaryStatDefinitions}
                     rarityDefinitions={state.rarityDefinitions}
                     affinityDefinitions={state.affinityDefinitions}
                     selectedId={selectedId}
@@ -4652,15 +5167,21 @@ function TierCompendium({
     onSelected: (id: string | null) => void;
     onChange: (tiers: TierDefinition[]) => void;
 }) {
-    const selected = tiers.find((tier) => tier.id === selectedId) ?? tiers[0] ?? null;
-    const update = (id: string, updater: (tier: TierDefinition) => TierDefinition) =>
+    const selected =
+        tiers.find((tier) => tier.id === selectedId) ?? tiers[0] ?? null;
+    const update = (
+        id: string,
+        updater: (tier: TierDefinition) => TierDefinition,
+    ) =>
         onChange(
             tiers
                 .map((tier) => (tier.id === id ? updater(tier) : tier))
                 .sort((a, b) => a.tier - b.tier),
         );
     const remove = (id: string) => {
-        const remaining = tiers.filter((tier) => tier.id !== id).sort((a, b) => a.tier - b.tier);
+        const remaining = tiers
+            .filter((tier) => tier.id !== id)
+            .sort((a, b) => a.tier - b.tier);
         onChange(remaining);
         onSelected(remaining[0]?.id ?? null);
     };
@@ -4668,17 +5189,23 @@ function TierCompendium({
     return (
         <div className="catalog-grid">
             <aside className="definition-list">
-                {[...tiers].sort((a, b) => a.tier - b.tier).map((tier) => (
-                    <button
-                        key={tier.id}
-                        type="button"
-                        className={`definition-row ${selected?.id === tier.id ? "selected" : ""}`}
-                        onClick={() => onSelected(tier.id)}
-                    >
-                        <span>T{tier.tier} · {tier.title}</span>
-                        <span className="race-type-tag">max {tier.maxLevel}</span>
-                    </button>
-                ))}
+                {[...tiers]
+                    .sort((a, b) => a.tier - b.tier)
+                    .map((tier) => (
+                        <button
+                            key={tier.id}
+                            type="button"
+                            className={`definition-row ${selected?.id === tier.id ? "selected" : ""}`}
+                            onClick={() => onSelected(tier.id)}
+                        >
+                            <span>
+                                T{tier.tier} · {tier.title}
+                            </span>
+                            <span className="race-type-tag">
+                                max {tier.maxLevel}
+                            </span>
+                        </button>
+                    ))}
             </aside>
             {selected ? (
                 <section className="definition-editor compact">
@@ -4692,7 +5219,12 @@ function TierCompendium({
                                 onChange={(event) =>
                                     update(selected.id, (tier) => ({
                                         ...tier,
-                                        tier: finiteInteger(event.target.value, tier.tier, 1, 999),
+                                        tier: finiteInteger(
+                                            event.target.value,
+                                            tier.tier,
+                                            1,
+                                            999,
+                                        ),
                                     }))
                                 }
                             />
@@ -4702,7 +5234,10 @@ function TierCompendium({
                             <input
                                 value={selected.title}
                                 onChange={(event) =>
-                                    update(selected.id, (tier) => ({ ...tier, title: event.target.value }))
+                                    update(selected.id, (tier) => ({
+                                        ...tier,
+                                        title: event.target.value,
+                                    }))
                                 }
                             />
                         </label>
@@ -4715,7 +5250,12 @@ function TierCompendium({
                                 onChange={(event) =>
                                     update(selected.id, (tier) => ({
                                         ...tier,
-                                        maxLevel: finiteInteger(event.target.value, tier.maxLevel, 1, 999),
+                                        maxLevel: finiteInteger(
+                                            event.target.value,
+                                            tier.maxLevel,
+                                            1,
+                                            999,
+                                        ),
                                     }))
                                 }
                             />
@@ -4726,18 +5266,23 @@ function TierCompendium({
                         <textarea
                             value={selected.details}
                             onChange={(event) =>
-                                update(selected.id, (tier) => ({ ...tier, details: event.target.value }))
+                                update(selected.id, (tier) => ({
+                                    ...tier,
+                                    details: event.target.value,
+                                }))
                             }
                         />
                     </label>
                     <div className="form-grid two-col compact-grid">
-                        {([
-                            ["Race Multiplier", "raceMultiplier"],
-                            ["Class Multiplier", "classMultiplier"],
-                            ["Job Multiplier", "jobMultiplier"],
-                            ["Item Multiplier", "itemMultiplier"],
-                            ["Static Tier Bonus", "staticBonus"],
-                        ] as const).map(([label, key]) => (
+                        {(
+                            [
+                                ["Race Multiplier", "raceMultiplier"],
+                                ["Class Multiplier", "classMultiplier"],
+                                ["Job Multiplier", "jobMultiplier"],
+                                ["Item Multiplier", "itemMultiplier"],
+                                ["Static Tier Bonus", "staticBonus"],
+                            ] as const
+                        ).map(([label, key]) => (
                             <label key={key}>
                                 {label}
                                 <input
@@ -4748,7 +5293,12 @@ function TierCompendium({
                                     onChange={(event) =>
                                         update(selected.id, (tier) => ({
                                             ...tier,
-                                            [key]: finiteNumber(event.target.value, tier[key], 0, 999999),
+                                            [key]: finiteNumber(
+                                                event.target.value,
+                                                tier[key],
+                                                0,
+                                                999999,
+                                            ),
                                         }))
                                     }
                                 />
@@ -4976,6 +5526,426 @@ function CharacterTypeCompendium({
     );
 }
 
+function StatCategoryCompendium({
+    categories,
+    selectedId,
+    onSelected,
+    onChange,
+}: {
+    categories: StatCategoryDefinition[];
+    selectedId: string | null;
+    onSelected: (id: string | null) => void;
+    onChange: (categories: StatCategoryDefinition[]) => void;
+}) {
+    const selected =
+        categories.find((entry) => entry.id === selectedId) ??
+        categories[0] ??
+        null;
+    const update = (
+        id: string,
+        updater: (entry: StatCategoryDefinition) => StatCategoryDefinition,
+    ) =>
+        onChange(
+            categories.map((entry) =>
+                entry.id === id ? updater(entry) : entry,
+            ),
+        );
+    const remove = (id: string) => {
+        const next = categories.filter((entry) => entry.id !== id);
+        onChange(next);
+        onSelected(next[0]?.id ?? null);
+    };
+
+    return (
+        <div className="catalog-grid">
+            <aside className="definition-list">
+                {[...categories]
+                    .sort((a, b) => a.order - b.order)
+                    .map((entry) => (
+                        <button
+                            key={entry.id}
+                            type="button"
+                            className={`definition-row ${selected?.id === entry.id ? "selected" : ""}`}
+                            onClick={() => onSelected(entry.id)}
+                        >
+                            <span>{entry.name}</span>
+                            <span className="race-type-tag">
+                                #{entry.order}
+                            </span>
+                        </button>
+                    ))}
+            </aside>
+            {selected ? (
+                <section className="definition-editor compact">
+                    <div className="editor-header grid-header">
+                        <label className="header-field name-field">
+                            Name
+                            <input
+                                value={selected.name}
+                                onChange={(event) =>
+                                    update(selected.id, (entry) => ({
+                                        ...entry,
+                                        name: event.target.value,
+                                    }))
+                                }
+                            />
+                        </label>
+                        <label className="header-field">
+                            Order
+                            <input
+                                type="number"
+                                min="1"
+                                value={selected.order}
+                                onChange={(event) =>
+                                    update(selected.id, (entry) => ({
+                                        ...entry,
+                                        order: finiteInteger(
+                                            event.target.value,
+                                            entry.order,
+                                            1,
+                                            999,
+                                        ),
+                                    }))
+                                }
+                            />
+                        </label>
+                    </div>
+                    <label className="full-width">
+                        Description
+                        <textarea
+                            value={selected.description}
+                            onChange={(event) =>
+                                update(selected.id, (entry) => ({
+                                    ...entry,
+                                    description: event.target.value,
+                                }))
+                            }
+                        />
+                    </label>
+                    <button
+                        type="button"
+                        className="danger"
+                        onClick={() => remove(selected.id)}
+                    >
+                        Delete Category
+                    </button>
+                </section>
+            ) : null}
+        </div>
+    );
+}
+
+function PrimaryStatCompendium({
+    stats,
+    categories,
+    selectedId,
+    onSelected,
+    onChange,
+}: {
+    stats: PrimaryStatDefinition[];
+    categories: StatCategoryDefinition[];
+    selectedId: string | null;
+    onSelected: (id: string | null) => void;
+    onChange: (stats: PrimaryStatDefinition[]) => void;
+}) {
+    const selected =
+        stats.find((entry) => entry.id === selectedId) ?? stats[0] ?? null;
+    const update = (
+        id: string,
+        updater: (entry: PrimaryStatDefinition) => PrimaryStatDefinition,
+    ) =>
+        onChange(
+            stats.map((entry) => (entry.id === id ? updater(entry) : entry)),
+        );
+
+    return (
+        <div className="catalog-grid">
+            <aside className="definition-list">
+                {sortedPrimaryStats(categories, stats).map((entry) => (
+                    <button
+                        key={entry.id}
+                        type="button"
+                        className={`definition-row ${selected?.id === entry.id ? "selected" : ""}`}
+                        onClick={() => onSelected(entry.id)}
+                    >
+                        <span>{entry.label}</span>
+                        <span className="race-type-tag">
+                            {entry.role === "aggressive" ? "A" : "D"}
+                        </span>
+                    </button>
+                ))}
+            </aside>
+            {selected ? (
+                <section className="definition-editor compact">
+                    <div className="editor-header grid-header">
+                        <label className="header-field name-field">
+                            Label
+                            <input
+                                value={selected.label}
+                                onChange={(event) =>
+                                    update(selected.id, (entry) => ({
+                                        ...entry,
+                                        label: event.target.value,
+                                    }))
+                                }
+                            />
+                        </label>
+                        <label className="header-field">
+                            Key
+                            <input value={selected.key} readOnly />
+                        </label>
+                        <label className="header-field">
+                            Role
+                            <select
+                                value={selected.role}
+                                onChange={(event) =>
+                                    update(selected.id, (entry) => ({
+                                        ...entry,
+                                        role: event.target
+                                            .value as PrimaryStatRole,
+                                    }))
+                                }
+                            >
+                                {primaryStatRoles.map((role) => (
+                                    <option key={role} value={role}>
+                                        {titleCase(role)}
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
+                        <label className="header-field">
+                            Category
+                            <select
+                                value={selected.categoryId}
+                                onChange={(event) =>
+                                    update(selected.id, (entry) => ({
+                                        ...entry,
+                                        categoryId: event.target.value,
+                                    }))
+                                }
+                            >
+                                {categories.map((category) => (
+                                    <option
+                                        key={category.id}
+                                        value={category.id}
+                                    >
+                                        {category.name}
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
+                        <label className="header-field">
+                            Order
+                            <input
+                                type="number"
+                                min="1"
+                                value={selected.order}
+                                onChange={(event) =>
+                                    update(selected.id, (entry) => ({
+                                        ...entry,
+                                        order: finiteInteger(
+                                            event.target.value,
+                                            entry.order,
+                                            1,
+                                            999,
+                                        ),
+                                    }))
+                                }
+                            />
+                        </label>
+                    </div>
+                    <label className="full-width">
+                        Description
+                        <textarea
+                            value={selected.description}
+                            onChange={(event) =>
+                                update(selected.id, (entry) => ({
+                                    ...entry,
+                                    description: event.target.value,
+                                }))
+                            }
+                        />
+                    </label>
+                </section>
+            ) : null}
+        </div>
+    );
+}
+
+function SecondaryStatCompendium({
+    stats,
+    primaryStats,
+    selectedId,
+    onSelected,
+    onChange,
+}: {
+    stats: SecondaryStatDefinition[];
+    primaryStats: PrimaryStatDefinition[];
+    selectedId: string | null;
+    onSelected: (id: string | null) => void;
+    onChange: (stats: SecondaryStatDefinition[]) => void;
+}) {
+    const selected =
+        stats.find((entry) => entry.id === selectedId) ?? stats[0] ?? null;
+    const update = (
+        id: string,
+        updater: (entry: SecondaryStatDefinition) => SecondaryStatDefinition,
+    ) =>
+        onChange(
+            stats.map((entry) => (entry.id === id ? updater(entry) : entry)),
+        );
+    const remove = (id: string) => {
+        const next = stats.filter((entry) => entry.id !== id);
+        onChange(next);
+        onSelected(next[0]?.id ?? null);
+    };
+
+    return (
+        <div className="catalog-grid">
+            <aside className="definition-list">
+                {[...stats]
+                    .sort((a, b) => a.order - b.order)
+                    .map((entry) => (
+                        <button
+                            key={entry.id}
+                            type="button"
+                            className={`definition-row ${selected?.id === entry.id ? "selected" : ""}`}
+                            onClick={() => onSelected(entry.id)}
+                        >
+                            <span>{entry.shortName}</span>
+                            <span className="race-type-tag">
+                                {entry.longName}
+                            </span>
+                        </button>
+                    ))}
+            </aside>
+            {selected ? (
+                <section className="definition-editor compact">
+                    <div className="editor-header grid-header">
+                        <label className="header-field">
+                            <span>Key</span>
+                            <input
+                                value={selected.key}
+                                onChange={(event) =>
+                                    update(selected.id, (entry) => ({
+                                        ...entry,
+                                        key: event.target.value
+                                            .toLowerCase()
+                                            .replace(/[^a-z0-9-]/g, "-"),
+                                    }))
+                                }
+                            />
+                        </label>
+                        <label className="header-field">
+                            <span>Short Name</span>
+                            <input
+                                value={selected.shortName}
+                                onChange={(event) =>
+                                    update(selected.id, (entry) => ({
+                                        ...entry,
+                                        shortName: event.target.value,
+                                    }))
+                                }
+                            />
+                        </label>
+                        <label className="header-field name-field">
+                            <span>Long Name</span>
+                            <input
+                                value={selected.longName}
+                                onChange={(event) =>
+                                    update(selected.id, (entry) => ({
+                                        ...entry,
+                                        longName: event.target.value,
+                                    }))
+                                }
+                            />
+                        </label>
+                        <label className="header-field">
+                            <span>Order</span>
+                            <input
+                                type="number"
+                                min="1"
+                                value={selected.order}
+                                onChange={(event) =>
+                                    update(selected.id, (entry) => ({
+                                        ...entry,
+                                        order: finiteInteger(
+                                            event.target.value,
+                                            entry.order,
+                                            1,
+                                            999,
+                                        ),
+                                    }))
+                                }
+                            />
+                        </label>
+                        <label className="header-field">
+                            <span>Tier-scaled stat</span>
+                            <select
+                                value={selected.multipliedStat}
+                                onChange={(event) =>
+                                    update(selected.id, (entry) => ({
+                                        ...entry,
+                                        multipliedStat: event.target
+                                            .value as StatKey,
+                                    }))
+                                }
+                            >
+                                {statKeys.map((key) => (
+                                    <option key={key} value={key}>
+                                        {statLabel(primaryStats, key)}
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
+                        <label className="header-field">
+                            <span>Added stat</span>
+                            <select
+                                value={selected.addedStat}
+                                onChange={(event) =>
+                                    update(selected.id, (entry) => ({
+                                        ...entry,
+                                        addedStat: event.target
+                                            .value as StatKey,
+                                    }))
+                                }
+                            >
+                                {statKeys.map((key) => (
+                                    <option key={key} value={key}>
+                                        {statLabel(primaryStats, key)}
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
+                    </div>
+                    <p className="muted small">
+                        Formula: tier-scaled stat × current tier + added stat.
+                    </p>
+                    <label className="full-width">
+                        Description
+                        <textarea
+                            value={selected.description}
+                            onChange={(event) =>
+                                update(selected.id, (entry) => ({
+                                    ...entry,
+                                    description: event.target.value,
+                                }))
+                            }
+                        />
+                    </label>
+                    <button
+                        type="button"
+                        className="danger"
+                        onClick={() => remove(selected.id)}
+                    >
+                        Delete Secondary Stat
+                    </button>
+                </section>
+            ) : null}
+        </div>
+    );
+}
+
 function StepperControl({
     value,
     min,
@@ -5065,6 +6035,7 @@ function AdvancementCompendium({
     kind,
     definitions,
     tierDefinitions,
+    primaryStatDefinitions,
     rarityDefinitions,
     affinityDefinitions,
     selectedId,
@@ -5074,6 +6045,7 @@ function AdvancementCompendium({
     kind: DefinitionKind;
     definitions: AdvancementDefinition[];
     tierDefinitions: TierDefinition[];
+    primaryStatDefinitions: PrimaryStatDefinition[];
     rarityDefinitions: RarityDefinition[];
     affinityDefinitions: AffinityDefinition[];
     selectedId: string | null;
@@ -5245,10 +6217,13 @@ function AdvancementCompendium({
                                 value={selectedDefinition.rarity}
                                 rarities={rarityOptions}
                                 onChange={(rarity) =>
-                                    update(selectedDefinition.id, (definition) => ({
-                                        ...definition,
-                                        rarity,
-                                    }))
+                                    update(
+                                        selectedDefinition.id,
+                                        (definition) => ({
+                                            ...definition,
+                                            rarity,
+                                        }),
+                                    )
                                 }
                             />
                         </label>
@@ -5280,7 +6255,9 @@ function AdvancementCompendium({
                                 <button
                                     type="button"
                                     className="stepper-btn"
-                                    disabled={selectedDefinition.minTier >= maxTier}
+                                    disabled={
+                                        selectedDefinition.minTier >= maxTier
+                                    }
                                     onClick={() =>
                                         update(
                                             selectedDefinition.id,
@@ -5314,6 +6291,7 @@ function AdvancementCompendium({
                     </label>
                     <RadarEditor
                         weights={selectedDefinition.statWeights}
+                        primaryStats={primaryStatDefinitions}
                         onChange={(statWeights) =>
                             update(selectedDefinition.id, (definition) => ({
                                 ...definition,
@@ -6030,7 +7008,10 @@ function SkillChipWithTooltip({
 
     useEffect(() => {
         if (hovered) {
-            timerRef.current = setTimeout(() => setShowTooltip(true), HOVER_CARD_DELAY_MS);
+            timerRef.current = setTimeout(
+                () => setShowTooltip(true),
+                HOVER_CARD_DELAY_MS,
+            );
         } else {
             if (timerRef.current) clearTimeout(timerRef.current);
             setShowTooltip(false);
@@ -6061,12 +7042,12 @@ function SkillChipWithTooltip({
 
             setFlipUp(shouldFlipUp);
             setTooltipPosition({
-                left: Math.min(
-                    Math.max(rect.left, viewportPadding),
-                    maxLeft,
-                ),
+                left: Math.min(Math.max(rect.left, viewportPadding), maxLeft),
                 top: shouldFlipUp
-                    ? Math.max(viewportPadding, rect.top - estimatedTooltipHeight - gap)
+                    ? Math.max(
+                          viewportPadding,
+                          rect.top - estimatedTooltipHeight - gap,
+                      )
                     : Math.min(
                           rect.bottom + gap,
                           window.innerHeight - viewportPadding,
@@ -6129,59 +7110,63 @@ function SkillChipWithTooltip({
             </span>
             {showTooltip && typeof document !== "undefined"
                 ? createPortal(
-                <span
-                    className={`skill-tooltip calculation-popover hover-card-portal ${flipUp ? "flip-up" : ""}`}
-                    style={{ left: tooltipPosition.left, top: tooltipPosition.top }}
-                >
-                    <strong>{skill.name}</strong>
-                    <span className={rarityClass(skill.rarity)}>
-                        {skill.rarity}
-                    </span>
-                    <span className="race-type-tag">
-                        Min Tier {skill.minTier}+
-                    </span>
-                    <span className="race-type-tag">{skill.kind}</span>
-                    {skill.levelled ? (
-                        <span className="race-type-tag">Leveled</span>
-                    ) : (
-                        <span className="race-type-tag">Unleveled</span>
-                    )}
-                    <span className="skill-tooltip-meta">
-                        <span>
-                            <strong>MP Cost</strong>
-                            {skill.mpCost ?? "Average"}
-                        </span>
-                        <span>
-                            <strong>Cooldown</strong>
-                            {skill.cooldown ?? "Instant"}
-                        </span>
-                        <span>
-                            <strong>Casting Time</strong>
-                            {skill.castingTime ?? "Instant"}
-                        </span>
-                    </span>
-                    {skillAffinities.length > 0 ? (
-                        <span className="skill-tooltip-affinities">
-                            {skillAffinities.map((aff) => (
-                                <span
-                                    key={aff.id}
-                                    className="race-type-tag"
-                                    style={{
-                                        color: aff.color,
-                                        borderColor: aff.color,
-                                    }}
-                                >
-                                    {aff.emoji ?? aff.name.charAt(0)} {aff.name}
-                                </span>
-                            ))}
-                        </span>
-                    ) : null}
-                    <span className="skill-tooltip-desc">
-                        {skill.description}
-                    </span>
-                </span>,
-                document.body,
-            )
+                      <span
+                          className={`skill-tooltip calculation-popover hover-card-portal ${flipUp ? "flip-up" : ""}`}
+                          style={{
+                              left: tooltipPosition.left,
+                              top: tooltipPosition.top,
+                          }}
+                      >
+                          <strong>{skill.name}</strong>
+                          <span className={rarityClass(skill.rarity)}>
+                              {skill.rarity}
+                          </span>
+                          <span className="race-type-tag">
+                              Min Tier {skill.minTier}+
+                          </span>
+                          <span className="race-type-tag">{skill.kind}</span>
+                          {skill.levelled ? (
+                              <span className="race-type-tag">Leveled</span>
+                          ) : (
+                              <span className="race-type-tag">Unleveled</span>
+                          )}
+                          <span className="skill-tooltip-meta">
+                              <span>
+                                  <strong>MP Cost</strong>
+                                  {skill.mpCost ?? "Average"}
+                              </span>
+                              <span>
+                                  <strong>Cooldown</strong>
+                                  {skill.cooldown ?? "Instant"}
+                              </span>
+                              <span>
+                                  <strong>Casting Time</strong>
+                                  {skill.castingTime ?? "Instant"}
+                              </span>
+                          </span>
+                          {skillAffinities.length > 0 ? (
+                              <span className="skill-tooltip-affinities">
+                                  {skillAffinities.map((aff) => (
+                                      <span
+                                          key={aff.id}
+                                          className="race-type-tag"
+                                          style={{
+                                              color: aff.color,
+                                              borderColor: aff.color,
+                                          }}
+                                      >
+                                          {aff.emoji ?? aff.name.charAt(0)}{" "}
+                                          {aff.name}
+                                      </span>
+                                  ))}
+                              </span>
+                          ) : null}
+                          <span className="skill-tooltip-desc">
+                              {skill.description}
+                          </span>
+                      </span>,
+                      document.body,
+                  )
                 : null}
         </button>
     );
@@ -6202,7 +7187,10 @@ function DefinitionChipWithTooltip({
 
     useEffect(() => {
         if (hovered) {
-            timerRef.current = setTimeout(() => setShowTooltip(true), HOVER_CARD_DELAY_MS);
+            timerRef.current = setTimeout(
+                () => setShowTooltip(true),
+                HOVER_CARD_DELAY_MS,
+            );
         } else {
             if (timerRef.current) clearTimeout(timerRef.current);
             setShowTooltip(false);
@@ -6232,12 +7220,12 @@ function DefinitionChipWithTooltip({
                 rect.top > estimatedTooltipHeight + gap;
 
             setTooltipPosition({
-                left: Math.min(
-                    Math.max(rect.left, viewportPadding),
-                    maxLeft,
-                ),
+                left: Math.min(Math.max(rect.left, viewportPadding), maxLeft),
                 top: shouldFlipUp
-                    ? Math.max(viewportPadding, rect.top - estimatedTooltipHeight - gap)
+                    ? Math.max(
+                          viewportPadding,
+                          rect.top - estimatedTooltipHeight - gap,
+                      )
                     : Math.min(
                           rect.bottom + gap,
                           window.innerHeight - viewportPadding,
@@ -6295,28 +7283,31 @@ function DefinitionChipWithTooltip({
             </span>
             {showTooltip && typeof document !== "undefined"
                 ? createPortal(
-                <span
-                    className="definition-tooltip calculation-popover hover-card-portal"
-                    style={{ left: tooltipPosition.left, top: tooltipPosition.top }}
-                >
-                    <strong>{definition.name}</strong>
-                    {definitionRaceTypeLabel ? (
-                        <span className="race-type-tag">
-                            {definitionRaceTypeLabel}
-                        </span>
-                    ) : null}
-                    <span className="race-type-tag">
-                        Min Tier {definition.minTier}+
-                    </span>
-                    <span className={rarityClass(definition.rarity)}>
-                        {definition.rarity}
-                    </span>
-                    <span className="skill-tooltip-desc">
-                        {definition.description}
-                    </span>
-                </span>,
-                document.body,
-            )
+                      <span
+                          className="definition-tooltip calculation-popover hover-card-portal"
+                          style={{
+                              left: tooltipPosition.left,
+                              top: tooltipPosition.top,
+                          }}
+                      >
+                          <strong>{definition.name}</strong>
+                          {definitionRaceTypeLabel ? (
+                              <span className="race-type-tag">
+                                  {definitionRaceTypeLabel}
+                              </span>
+                          ) : null}
+                          <span className="race-type-tag">
+                              Min Tier {definition.minTier}+
+                          </span>
+                          <span className={rarityClass(definition.rarity)}>
+                              {definition.rarity}
+                          </span>
+                          <span className="skill-tooltip-desc">
+                              {definition.description}
+                          </span>
+                      </span>,
+                      document.body,
+                  )
                 : null}
         </button>
     );
@@ -6327,6 +7318,7 @@ function ItemCompendium({
     tierDefinitions,
     rarityDefinitions,
     skills,
+    primaryStatDefinitions,
     affinityDefinitions,
     selectedId,
     onSelected,
@@ -6336,6 +7328,7 @@ function ItemCompendium({
     tierDefinitions: TierDefinition[];
     rarityDefinitions: RarityDefinition[];
     skills: SkillDefinition[];
+    primaryStatDefinitions: PrimaryStatDefinition[];
     affinityDefinitions: AffinityDefinition[];
     selectedId: string | null;
     onSelected: (id: string | null) => void;
@@ -6493,7 +7486,10 @@ function ItemCompendium({
                                         rarity,
                                         skillIds: item.skillIds.slice(
                                             0,
-                                            Math.max(0, rarityOptions.indexOf(rarity)),
+                                            Math.max(
+                                                0,
+                                                rarityOptions.indexOf(rarity),
+                                            ),
                                         ),
                                     }))
                                 }
@@ -6548,6 +7544,7 @@ function ItemCompendium({
                     </label>
                     <RadarEditor
                         weights={selected.statWeights}
+                        primaryStats={primaryStatDefinitions}
                         onChange={(statWeights) =>
                             update(selected.id, (item) => ({
                                 ...item,
@@ -6650,7 +7647,8 @@ function ItemCompendium({
                                     {Math.max(
                                         0,
                                         rarityOptions.indexOf(selected.rarity),
-                                    )})
+                                    )}
+                                    )
                                 </p>
                                 <p className="muted small">
                                     Drag skills from the list on the left onto
@@ -6708,10 +7706,12 @@ function ItemCompendium({
 
 function RadarEditor({
     weights,
+    primaryStats,
     onChange,
     compact,
 }: {
     weights: Partial<StatBlock>;
+    primaryStats?: PrimaryStatDefinition[];
     onChange: (weights: Partial<StatBlock>) => void;
     compact?: boolean;
 }) {
@@ -6796,7 +7796,10 @@ function RadarEditor({
                                 textAnchor="middle"
                                 dominantBaseline="middle"
                             >
-                                {STAT_LABELS[key].replace(" ", "\n")}
+                                {statLabel(primaryStats, key).replace(
+                                    " ",
+                                    "\n",
+                                )}
                             </text>
                             <circle
                                 cx={point.x}
@@ -6938,7 +7941,7 @@ function SystemPath({
                 ) : null}
             </header>
             <div className="timeline">
-                    {tierDefinitions.map((rule) => {
+                {tierDefinitions.map((rule) => {
                     const allTierMilestones = milestones.filter(
                         (milestone) => milestone.tier === rule.tier,
                     );
@@ -6960,7 +7963,10 @@ function SystemPath({
                     const displayMilestones =
                         status === "current"
                             ? allTierMilestones.filter(
-                                  (m) => m.source !== "Race" && m.source !== "Class" && m.source !== "Job",
+                                  (m) =>
+                                      m.source !== "Race" &&
+                                      m.source !== "Class" &&
+                                      m.source !== "Job",
                               )
                             : allTierMilestones;
 
@@ -6979,7 +7985,9 @@ function SystemPath({
                                 </h3>
                                 <p>{rule.details}</p>
                                 <p className="muted small">
-                                    Static tier bonus: +{displayNumber(rule.staticBonus)} to all stats
+                                    Static tier bonus: +
+                                    {displayNumber(rule.staticBonus)} to all
+                                    stats
                                 </p>
 
                                 {/* Race / Class / Job stat summaries */}
@@ -7027,10 +8035,14 @@ function SystemPath({
                                                     </strong>
                                                     <span
                                                         className={rarityClass(
-                                                            tierData.classTrack.rarity,
+                                                            tierData.classTrack
+                                                                .rarity,
                                                         )}
                                                     >
-                                                        {tierData.classTrack.rarity}
+                                                        {
+                                                            tierData.classTrack
+                                                                .rarity
+                                                        }
                                                     </span>
                                                     {typeof tierData.classTrack
                                                         .level === "number" ? (
@@ -7060,10 +8072,14 @@ function SystemPath({
                                                     </strong>
                                                     <span
                                                         className={rarityClass(
-                                                            tierData.jobTrack.rarity,
+                                                            tierData.jobTrack
+                                                                .rarity,
                                                         )}
                                                     >
-                                                        {tierData.jobTrack.rarity}
+                                                        {
+                                                            tierData.jobTrack
+                                                                .rarity
+                                                        }
                                                     </span>
                                                     {typeof tierData.jobTrack
                                                         .level === "number" ? (

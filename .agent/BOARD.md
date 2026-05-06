@@ -12,6 +12,20 @@
 
 ## Done
 
+### TASK-012: Database-backed stat metadata and secondary formulas
+
+- Status: Done
+- Priority: P1
+- Owner/agent: orchestrator with explorer support
+- Links: `src/types.ts`, `src/data.ts`, `src/storage.ts`, `src/App.tsx`, `src/styles.css`, `README.md`, `StatSheet.md`, `docs/architecture.md`
+- Acceptance criteria:
+  - Stat categories are stored in shared state and editable in the Compendium.
+  - Primary stat labels/categories/aggressive-or-defensive roles/order are stored in shared state and editable in the Compendium.
+  - Character sheet stats show A/D markers and sort by role before category/order.
+  - Secondary stats are stored in shared state with short name, long name, description, and formula fields.
+  - HP and MP preserve existing formulas; SP and DP are added with requested formulas.
+- Notes/progress: Added stat category, primary stat, and secondary stat definitions to `AppState`, defaults, sanitization, Compendium tabs/editors, dynamic sheet sorting/markers, dynamic secondary stat values/popups, and docs. Validation remains blocked by missing TypeScript language server and Windows npm resolving through `cmd.exe` from the WSL UNC path.
+
 ### TASK-011: Enforce creator item skill slots and race notices
 
 - Status: Done

@@ -47,3 +47,11 @@
 - Alternatives considered: Keep hard-coded `TIER_RULES` and only add a separate multiplier table; make tier bonuses item-like bonuses instead of tier metadata.
 - Consequences: Tables can add or rebalance tiers from the Compendium. Existing ledgers receive default tier definitions during sanitization. Static tier bonuses now contribute to every stat for each reached tier.
 - Related files/tasks: `src/types.ts`, `src/data.ts`, `src/storage.ts`, `src/App.tsx`, TASK-006.
+
+## 2026-05-05: Store stat metadata and secondary formulas in the shared ledger
+
+- Context: Stat categories, primary stat labels/roles, and HP/MP calculations were hard-coded, preventing table-specific stat organization and new secondary stats without code changes.
+- Decision: Add stat category, primary stat, and secondary stat definition arrays to `AppState`. Keep the canonical primary stat keys fixed for existing stat blocks, but move labels, categories, aggressive/defensive role, order, and secondary formula inputs into editable ledger data.
+- Alternatives considered: Make primary stat keys fully dynamic; keep only secondary stat formulas dynamic.
+- Consequences: Existing ledgers receive defaults during sanitization, character sheets can sort/mark stats from ledger metadata, and HP/MP/SP/DP secondary values come from persisted formulas. Fully dynamic primary stat keys remain a larger future migration because existing characters/items/tracks store stat blocks keyed by the current `StatKey` union.
+- Related files/tasks: `src/types.ts`, `src/data.ts`, `src/storage.ts`, `src/App.tsx`, TASK-012.

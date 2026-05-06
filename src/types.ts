@@ -5,6 +5,7 @@ export type SkillKind = 'Active' | 'Passive';
 export type SkillSource = 'Race' | 'Class' | 'Job' | 'Item' | 'Other';
 export type ItemSlot = 'Armor' | 'Accessory' | 'Weapon' | 'Other';
 export type DefinitionKind = 'race' | 'class' | 'job';
+export type PrimaryStatRole = 'aggressive' | 'defensive';
 export type StatKey =
   | 'strength'
   | 'fortitude'
@@ -118,6 +119,34 @@ export interface CharacterTypeDefinition {
   multiplier: number;
 }
 
+export interface StatCategoryDefinition {
+  id: string;
+  name: string;
+  description: string;
+  order: number;
+}
+
+export interface PrimaryStatDefinition {
+  id: string;
+  key: StatKey;
+  label: string;
+  categoryId: string;
+  role: PrimaryStatRole;
+  description: string;
+  order: number;
+}
+
+export interface SecondaryStatDefinition {
+  id: string;
+  key: string;
+  shortName: string;
+  longName: string;
+  description: string;
+  multipliedStat: StatKey;
+  addedStat: StatKey;
+  order: number;
+}
+
 export interface CharacterCurrency {
   id: string;
   currencyId: string;
@@ -187,6 +216,12 @@ export interface Character {
   playerId: string;
   name: string;
   age: string;
+  size: string;
+  build: string;
+  pronouns: string;
+  gender: string;
+  sexualPreference: string;
+  appearance: string;
   kind: CharacterKind;
   halfMonsterFocus?: HalfMonsterFocus;
   currentTier: number;
@@ -209,6 +244,9 @@ export interface AppState {
   characters: Character[];
   tierDefinitions: TierDefinition[];
   characterTypeDefinitions: CharacterTypeDefinition[];
+  statCategoryDefinitions: StatCategoryDefinition[];
+  primaryStatDefinitions: PrimaryStatDefinition[];
+  secondaryStatDefinitions: SecondaryStatDefinition[];
   definitions: AdvancementDefinition[];
   rarityDefinitions: RarityDefinition[];
   affinityDefinitions: AffinityDefinition[];

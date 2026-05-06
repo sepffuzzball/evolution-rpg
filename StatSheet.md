@@ -10,11 +10,15 @@ Level - The Character's level, with the current tier max in parenthesis (for exa
 Exp - An abstract of how close a level (or for humanoids, class level and job level which means humanoids have 2 separate Exp bars) in a bar form from 0-100%
 
 ## Secondary Stats
-HP - Health Points - [Calculation: (Fortitude * Tier) + Strength + Passive Bonuses + Equipment Bonuses]
-MP - Mana Points - [Calculation: (Mana * Tier) + Intelligence + Passive Bonuses + Equipment Bonuses]
+Secondary stats are managed from the app Compendium and stored in the shared ledger. Each secondary stat has a short name, long name, description, and formula of `Tier-scaled stat * Current Tier + Added stat`.
+
+- HP - Health Points - `(Fortitude * Tier) + Strength`
+- MP - Mana Points - `(Mana * Tier) + Intelligence`
+- SP - Stamina Points - `(Fortitude * Tier) + Agility`
+- DP - Divine Points - `(Charisma * Tier) + Wisdom`
 
 ## Stats
-On a stat sheet, the total stats should be shown but the bonus from the current race should be in parenthesis next to it - For example, Strength 40 (-10) for a race that is known to be physically weak.
+Primary stat categories, labels, descriptions, sort order, and aggressive/defensive role are managed from the app Compendium and stored in the shared ledger. On the character sheet, aggressive stats are marked with `A`, defensive stats are marked with `D`, and stats are sorted by role before category/order. The parenthetical on each stat shows equipment bonus only; tier bonuses and formula breakdowns are shown in the stat popup.
 
 ### Stat Growth Formulas
 
@@ -27,7 +31,7 @@ Each level in a track contributes one full level-up point pool, including level 
 - Item stat points: `Tier Item Multiplier * Rarity Multiplier`.
 - Static tier bonus: each reached tier adds its tier bonus to every stat. Defaults use `Tier * 10`.
 
-Character Type, Tier, and Rarity multipliers are managed from the app Compendium and stored with the shared ledger.
+Character Type, Tier, Rarity, primary stat metadata, stat categories, and secondary stat formulas are managed from the app Compendium and stored with the shared ledger.
 
 ### Physical
 Strength - A character's physical strength, the ability to push, pull, swing, etc.

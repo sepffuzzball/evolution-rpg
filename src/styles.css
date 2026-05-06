@@ -69,6 +69,7 @@ textarea {
 button,
 .secondary-button {
     border: 1px solid rgba(139, 233, 253, 0.42);
+    max-height: 6rem;
     border-radius: 999px;
     padding: 0.7rem 1rem;
     background: linear-gradient(
@@ -426,6 +427,30 @@ h3 {
     font-style: normal;
     font-size: 0.82rem;
 }
+.stat-role-marker {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    vertical-align: middle;
+    min-width: 1rem;
+    height: 1rem;
+    margin-left: 0.25rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-size: 0.62rem;
+    font-weight: 800;
+    line-height: 1;
+}
+.stat-role-aggressive {
+    color: #ffb86c;
+    border-color: rgba(255, 184, 108, 0.55);
+    background: rgba(255, 184, 108, 0.12);
+}
+.stat-role-defensive {
+    color: #8be9fd;
+    border-color: rgba(139, 233, 253, 0.55);
+    background: rgba(139, 233, 253, 0.12);
+}
 .stat-row--breakdown,
 .vital-row--breakdown {
     position: relative;
@@ -516,6 +541,9 @@ h3 {
 }
 .vital-breakdown-table {
     table-layout: auto;
+}
+.vital-breakdown-table td {
+    white-space: normal;
 }
 .vital-row {
     padding: 0.85rem 0;
@@ -625,7 +653,7 @@ h3 {
 .definition-card-list {
     display: grid;
     gap: 0.45rem;
-    max-height: 18rem;
+    min-height: 18rem;
     overflow: auto;
     padding-right: 0.15rem;
 }
@@ -1023,7 +1051,7 @@ h3 {
 }
 .creator-skills-panel,
 .creator-items-panel {
-    max-height: 28rem;
+    min-height: 28rem;
     overflow: auto;
     border: 1px solid var(--line);
     border-radius: 1rem;
@@ -1049,7 +1077,7 @@ h3 {
     gap: 0.85rem;
 }
 .skill-source-list {
-    max-height: 22rem;
+    min-height: 22rem;
     overflow-y: auto;
     overflow-x: visible;
 }
