@@ -177,6 +177,31 @@ function secondaryStatValue(
     );
 }
 
+function secondaryStatLabel(
+    definitions: SecondaryStatDefinition[] | undefined,
+    key: string | undefined,
+): string {
+    const definition = definitions?.find((entry) => entry.key === key);
+    return definition
+        ? `${definition.shortName} (${definition.longName})`
+        : (key?.toUpperCase() ?? "MP");
+}
+
+function skillHasCost(skill: Pick<Skill | SkillDefinition, "mpCost">): boolean {
+    const cost = skill.mpCost ?? "None";
+    return cost !== "None" && cost !== "N/A";
+}
+
+function skillCostText(
+    skill: Pick<Skill | SkillDefinition, "mpCost" | "costStatKey">,
+    definitions: SecondaryStatDefinition[] | undefined,
+): string {
+    const cost = skill.mpCost ?? "N/A";
+    return skillHasCost(skill)
+        ? `${cost} ${secondaryStatLabel(definitions, skill.costStatKey)}`
+        : cost;
+}
+
 function currentTierData(character: Character): TierProgression | undefined {
     return character.tiers.find((tier) => tier.status === "current");
 }
@@ -420,6 +445,7 @@ function createSkillDefinition(
         levelled,
         affinityIds: [],
         mpCost: "Average",
+        costStatKey: "mp",
         cooldown: "Instant",
         castingTime: "Instant",
     };
@@ -455,6 +481,7 @@ function skillFromDefinition(
         mpCost:
             definition.mpCost ??
             (definition.kind === "Active" ? "Average" : "N/A"),
+        costStatKey: definition.costStatKey ?? "mp",
         castingTime:
             definition.castingTime ??
             (definition.kind === "Active" ? "Instant" : "N/A"),
@@ -719,6 +746,7 @@ function itemSetSkills(
                 mpCost:
                     definition?.mpCost ??
                     (definition?.kind === "Passive" ? "N/A" : "Average"),
+                costStatKey: definition?.costStatKey ?? "mp",
                 castingTime:
                     definition?.castingTime ??
                     (definition?.kind === "Passive" ? "N/A" : "Instant"),
@@ -1889,6 +1917,9 @@ function App() {
                             }
                             rarityDefinitions={state.rarityDefinitions}
                             skillDefinitions={state.skillDefinitions}
+                            secondaryStatDefinitions={
+                                state.secondaryStatDefinitions
+                            }
                             itemDefinitions={state.itemDefinitions}
                             affinityDefinitions={state.affinityDefinitions}
                             onDraft={updateDraft}
@@ -2610,6 +2641,7 @@ function CharacterSheet({
                 <SkillList
                     title="Active"
                     skills={activeSkills}
+                    secondaryStatDefinitions={secondaryStatDefinitions}
                     onChange={(skillId, updater) =>
                         onUpdate((current) => ({
                             ...current,
@@ -2622,6 +2654,7 @@ function CharacterSheet({
                 <SkillList
                     title="Passive"
                     skills={passiveSkills}
+                    secondaryStatDefinitions={secondaryStatDefinitions}
                     onChange={(skillId, updater) =>
                         onUpdate((current) => ({
                             ...current,
@@ -2964,10 +2997,12 @@ function TrackProgress({ label, track, onStep }: TrackProgressProps) {
 function SkillList({
     title,
     skills,
+    secondaryStatDefinitions,
     onChange,
 }: {
     title: string;
     skills: Skill[];
+    secondaryStatDefinitions: SecondaryStatDefinition[];
     onChange: (skillId: string, updater: (skill: Skill) => Skill) => void;
 }) {
     return (
@@ -2987,7 +3022,8 @@ function SkillList({
                             </div>
                             <p>{skill.description || "No description yet."}</p>
                             <p className="small muted">
-                                {skill.source} · MP {skill.mpCost || "N/A"} ·
+                                {skill.source} · Skill Cost{" "}
+                                {skillCostText(skill, secondaryStatDefinitions)} ·
                                 Cooldown {skill.cooldown || "N/A"}
                             </p>
                             {isItemProvided ? (
@@ -3095,6 +3131,7 @@ interface CreatorWizardProps {
     characterTypeDefinitions: CharacterTypeDefinition[];
     rarityDefinitions: RarityDefinition[];
     skillDefinitions: SkillDefinition[];
+    secondaryStatDefinitions: SecondaryStatDefinition[];
     itemDefinitions: ItemDefinition[];
     affinityDefinitions: AffinityDefinition[];
     onStep: (step: WizardStep) => void;
@@ -3112,6 +3149,7 @@ function CreatorWizard({
     characterTypeDefinitions,
     rarityDefinitions,
     skillDefinitions,
+    secondaryStatDefinitions,
     itemDefinitions,
     affinityDefinitions,
     onStep,
@@ -3476,6 +3514,7 @@ function CreatorWizard({
             level: 1,
             exp: 0,
             mpCost: kind === "Active" ? "1 MP" : "N/A",
+            costStatKey: "mp",
             castingTime: kind === "Active" ? "Instant" : "N/A",
             cooldown: kind === "Active" ? "None" : "N/A",
             description: "",
@@ -4401,6 +4440,9 @@ function CreatorWizard({
                                         affinityDefinitions={
                                             affinityDefinitions
                                         }
+                                        secondaryStatDefinitions={
+                                            secondaryStatDefinitions
+                                        }
                                         onDragStart={(event) =>
                                             event.dataTransfer.setData(
                                                 "text/plain",
@@ -4433,6 +4475,9 @@ function CreatorWizard({
                             <SkillEditor
                                 key={skill.id}
                                 skill={skill}
+                                secondaryStatDefinitions={
+                                    secondaryStatDefinitions
+                                }
                                 onChange={(updater) =>
                                     updateSkill(skill.id, updater)
                                 }
@@ -4643,10 +4688,12 @@ function TrackAssignment({
 
 function SkillEditor({
     skill,
+    secondaryStatDefinitions,
     onChange,
     onRemove,
 }: {
     skill: Skill;
+    secondaryStatDefinitions: SecondaryStatDefinition[];
     onChange: (updater: (skill: Skill) => Skill) => void;
     onRemove: () => void;
 }) {
@@ -4717,8 +4764,22 @@ function SkillEditor({
                     />
                 </div>
                 <label>
-                    MP Cost
+                    Skill Cost
                     <input value={skill.mpCost} readOnly />
+                </label>
+                <label>
+                    Cost Stat
+                    <input
+                        value={
+                            skillHasCost(skill)
+                                ? secondaryStatLabel(
+                                      secondaryStatDefinitions,
+                                      skill.costStatKey,
+                                  )
+                                : "N/A"
+                        }
+                        readOnly
+                    />
                 </label>
                 <label>
                     Casting Time
@@ -5142,6 +5203,7 @@ function CatalogManager({
                 <SkillCompendium
                     skills={state.skillDefinitions}
                     tierDefinitions={state.tierDefinitions}
+                    secondaryStatDefinitions={state.secondaryStatDefinitions}
                     rarityDefinitions={state.rarityDefinitions}
                     affinityDefinitions={state.affinityDefinitions}
                     selectedId={selectedId}
@@ -5158,6 +5220,7 @@ function CatalogManager({
                     rarityDefinitions={state.rarityDefinitions}
                     skills={state.skillDefinitions}
                     primaryStatDefinitions={state.primaryStatDefinitions}
+                    secondaryStatDefinitions={state.secondaryStatDefinitions}
                     affinityDefinitions={state.affinityDefinitions}
                     selectedId={selectedId}
                     onSelected={setSelectedId}
@@ -6670,6 +6733,7 @@ function CurrencyCompendium({
 function SkillCompendium({
     skills,
     tierDefinitions,
+    secondaryStatDefinitions,
     rarityDefinitions,
     affinityDefinitions,
     selectedId,
@@ -6678,6 +6742,7 @@ function SkillCompendium({
 }: {
     skills: SkillDefinition[];
     tierDefinitions: TierDefinition[];
+    secondaryStatDefinitions: SecondaryStatDefinition[];
     rarityDefinitions: RarityDefinition[];
     affinityDefinitions: AffinityDefinition[];
     selectedId: string | null;
@@ -6890,7 +6955,7 @@ function SkillCompendium({
                     </label>
                     <div className="form-grid two-col compact-grid">
                         <label>
-                            MP Cost
+                            Skill Cost
                             <select
                                 value={selected.mpCost ?? "Average"}
                                 onChange={(event) =>
@@ -6910,6 +6975,28 @@ function SkillCompendium({
                                 <option>High</option>
                                 <option>Gargantuan</option>
                                 <option>Cataclysmic</option>
+                            </select>
+                        </label>
+                        <label>
+                            Cost Stat
+                            <select
+                                value={selected.costStatKey ?? "mp"}
+                                onChange={(event) =>
+                                    update(selected.id, (skill) => ({
+                                        ...skill,
+                                        costStatKey: event.target.value,
+                                    }))
+                                }
+                            >
+                                {secondaryStatDefinitions.map((definition) => (
+                                    <option
+                                        key={definition.key}
+                                        value={definition.key}
+                                    >
+                                        {definition.shortName} (
+                                        {definition.longName})
+                                    </option>
+                                ))}
                             </select>
                         </label>
                         <label>
@@ -7022,10 +7109,12 @@ function SkillCompendium({
 function SkillChipWithTooltip({
     skill,
     affinityDefinitions,
+    secondaryStatDefinitions,
     onDragStart,
 }: {
     skill: SkillDefinition;
     affinityDefinitions: AffinityDefinition[];
+    secondaryStatDefinitions?: SecondaryStatDefinition[];
     onDragStart: (event: React.DragEvent) => void;
 }) {
     const [hovered, setHovered] = useState(false);
@@ -7161,8 +7250,11 @@ function SkillChipWithTooltip({
                           )}
                           <span className="skill-tooltip-meta">
                               <span>
-                                  <strong>MP Cost</strong>
-                                  {skill.mpCost ?? "Average"}
+                                  <strong>Skill Cost</strong>
+                                  {skillCostText(
+                                      skill,
+                                      secondaryStatDefinitions,
+                                  )}
                               </span>
                               <span>
                                   <strong>Cooldown</strong>
@@ -7348,6 +7440,7 @@ function ItemCompendium({
     rarityDefinitions,
     skills,
     primaryStatDefinitions,
+    secondaryStatDefinitions,
     affinityDefinitions,
     selectedId,
     onSelected,
@@ -7358,6 +7451,7 @@ function ItemCompendium({
     rarityDefinitions: RarityDefinition[];
     skills: SkillDefinition[];
     primaryStatDefinitions: PrimaryStatDefinition[];
+    secondaryStatDefinitions: SecondaryStatDefinition[];
     affinityDefinitions: AffinityDefinition[];
     selectedId: string | null;
     onSelected: (id: string | null) => void;
@@ -7633,6 +7727,9 @@ function ItemCompendium({
                                             skill={skill}
                                             affinityDefinitions={
                                                 affinityDefinitions
+                                            }
+                                            secondaryStatDefinitions={
+                                                secondaryStatDefinitions
                                             }
                                             onDragStart={(event) =>
                                                 event.dataTransfer.setData(

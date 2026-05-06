@@ -85,6 +85,7 @@ export interface Skill {
   level: number | null;
   exp: number;
   mpCost: string;
+  costStatKey?: string;
   castingTime: string;
   cooldown: string;
   description: string;
@@ -163,6 +164,7 @@ export interface SkillDefinition {
   levelled: boolean;
   affinityIds: string[];
   mpCost?: 'None' | 'Negligible' | 'Tiny' | 'Small' | 'Average' | 'Somewhat High' | 'High' | 'Gargantuan' | 'Cataclysmic';
+  costStatKey?: string;
   cooldown?: 'Instant' | 'A few seconds' | '30 seconds' | '1 minute' | '5 minutes' | '30 minutes' | '1 hour' | '4 hours' | '1 day' | '1 week' | '1 month' | '1 year';
   castingTime?: 'Instant' | 'A few seconds' | '30 seconds' | '1 minute' | '5 minutes' | '30 minutes' | '1 hour' | '4 hours' | '1 day' | '1 week' | '1 month' | '1 year';
 }

@@ -332,6 +332,10 @@ function sanitizeSkillDefinition(value: unknown): SkillDefinition | null {
     kind: optionValue(value.kind, skillKinds, 'Active'),
     levelled: Boolean(value.levelled),
     affinityIds: Array.isArray(value.affinityIds) ? value.affinityIds.filter((entry: unknown): entry is string => typeof entry === 'string') : [],
+    mpCost: stringValue(value.mpCost, value.kind === 'Passive' ? 'N/A' : 'Average') as SkillDefinition['mpCost'],
+    costStatKey: stringValue(value.costStatKey, 'mp'),
+    castingTime: stringValue(value.castingTime, value.kind === 'Passive' ? 'N/A' : 'Instant') as SkillDefinition['castingTime'],
+    cooldown: stringValue(value.cooldown, value.kind === 'Passive' ? 'N/A' : 'Instant') as SkillDefinition['cooldown'],
   };
 }
 
@@ -381,6 +385,7 @@ function sanitizeSkill(value: unknown): Skill | null {
     level: value.level === null ? null : Math.round(numberValue(value.level, 1, 0, 999)),
     exp: clampPercent(numberValue(value.exp, 0, 0, 100)),
     mpCost: stringValue(value.mpCost, 'N/A'),
+    costStatKey: stringValue(value.costStatKey, 'mp'),
     castingTime: stringValue(value.castingTime, 'N/A'),
     cooldown: stringValue(value.cooldown, 'N/A'),
     description: stringValue(value.description, ''),
