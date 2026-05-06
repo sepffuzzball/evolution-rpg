@@ -254,11 +254,39 @@ h3 {
 .player-group {
     margin-bottom: 1rem;
 }
-.player-group h2 {
+.player-group-toggle {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.45rem;
+    padding: 0.45rem 0.55rem;
+    border-color: transparent;
+    background: transparent;
+    text-align: left;
     font-size: 0.95rem;
     color: var(--muted);
     text-transform: uppercase;
     letter-spacing: 0.12em;
+}
+.player-group-toggle:hover,
+.player-group-toggle:focus-visible {
+    border-color: rgba(139, 233, 253, 0.35);
+    background: rgba(139, 233, 253, 0.08);
+}
+.collapse-indicator {
+    color: var(--accent);
+    font-size: 0.85rem;
+}
+.player-count {
+    margin-left: auto;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 0.1rem 0.45rem;
+    color: var(--text);
+    font-size: 0.72rem;
+    letter-spacing: 0;
 }
 .character-card {
     width: 100%;

@@ -1435,6 +1435,9 @@ function App() {
     );
     const [mode, setMode] = useState<ViewMode>("sheet");
     const [newPlayerName, setNewPlayerName] = useState("");
+    const [collapsedPlayerIds, setCollapsedPlayerIds] = useState<Set<string>>(
+        () => new Set(),
+    );
     const [draft, setDraft] = useState<Character | null>(null);
     const [wizardStep, setWizardStep] = useState<WizardStep>(0);
     const [levelUpNotices, setLevelUpNotices] = useState<LevelUpNotice[]>([]);
@@ -1546,6 +1549,15 @@ function App() {
             players: [...current.players, player],
         }));
         setNewPlayerName("");
+    }
+
+    function togglePlayerCollapsed(playerId: string): void {
+        setCollapsedPlayerIds((current) => {
+            const next = new Set(current);
+            if (next.has(playerId)) next.delete(playerId);
+            else next.add(playerId);
+            return next;
+        });
     }
 
     function startCreate(kind: CharacterKind = "humanoid"): void {
@@ -1696,15 +1708,32 @@ function App() {
                         const characters = state.characters.filter(
                             (character) => character.playerId === player.id,
                         );
+                        const collapsed = collapsedPlayerIds.has(player.id);
                         return (
-                            <div key={player.id} className="player-group">
-                                <h2>{player.name}</h2>
-                                {characters.length === 0 ? (
+                            <div
+                                key={player.id}
+                                className={`player-group ${collapsed ? "collapsed" : ""}`}
+                            >
+                                <button
+                                    type="button"
+                                    className="player-group-toggle"
+                                    onClick={() => togglePlayerCollapsed(player.id)}
+                                    aria-expanded={!collapsed}
+                                >
+                                    <span className="collapse-indicator">
+                                        {collapsed ? "▸" : "▾"}
+                                    </span>
+                                    <span>{player.name}</span>
+                                    <span className="player-count">
+                                        {characters.length}
+                                    </span>
+                                </button>
+                                {!collapsed && characters.length === 0 ? (
                                     <p className="muted small">
                                         No characters yet.
                                     </p>
                                 ) : null}
-                                {characters.map((character) => {
+                                {!collapsed && characters.map((character) => {
                                     const tierData = currentTierData(character);
                                     const classLevel =
                                         tierData?.classTrack?.level ?? 1;
